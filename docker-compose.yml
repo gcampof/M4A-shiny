@@ -7,17 +7,14 @@ services:
     environment:
       PASSWORD: rstudio
     volumes:
-      - ./M4A-main:/home/rstudio/project/code
-      - ./shiny/app:/home/rstudio/project/shiny   
+      - ./shiny/app:/home/rstudio/project/shiny
     restart: unless-stopped
-
- # shiny:
-  #   build: ./shiny
-  #   container_name: m4a-shiny
-  #   ports:
-  #     - "3838:3838"
-  #   volumes:
-  #     - ./shiny/app:/srv/shiny-server
-  #   depends_on:
-  #     - rstudio
-  #   restart: unless-stopped
+ 
+  shiny:
+    build: ./shiny
+    container_name: m4a-shiny
+    ports:
+      - "3838:3838"
+    volumes:
+      - ./shiny/app:/srv/shiny-server
+    restart: unless-stopped
