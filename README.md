@@ -1,4 +1,4 @@
-# M4A — DNA Methylation Analysis
+# Methylation For All (M4A) — DNA Methylation Analysis Platform
 
 M4A is a containerized platform for DNA methylation analysis, built on R/Bioconductor. It supports array-based methylation data (450k, EPIC and EPICv2) and provides tools for quality control, normalization, differential methylation analysis, copy number variation, pathway enrichment, and more.
 
