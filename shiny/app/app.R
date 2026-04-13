@@ -34,13 +34,6 @@ library(ggpubr)
 options(shiny.reactlog = TRUE)
 options(shiny.maxRequestSize = 10 * 1024^3)
 
-# Global setup
-cfg_global  <- config::get()
-DIRS_global <- setup_common_dirs(cfg_global)
-
-# Cleanup on start
-cleanup_old_analysis_dirs(DIRS_global$data, max_age_hours = 24)
-
 # UI
 ui <- navbarPage(
   id = "main_navbar", 
@@ -113,12 +106,7 @@ ui <- navbarPage(
     ")),
     div(
       class = "navbar-right-logs",
-      downloadButton(
-        outputId = "download_logs",
-        label = tagList(" Download Logs"),
-        class = "btn btn-outline-secondary btn-logout",
-        style = "border-radius: 20px; font-size: 0.9rem; padding: 6px 20px;"
-      )
+      uiOutput("session_id_display"),
     )
   ),
   tabPanel(
@@ -141,10 +129,26 @@ server <- function(input, output, session) {
   DIRS <- setup_common_dirs(cfg)
   DIRS <- setup_analysis_dir(DIRS, cfg, session)
   APP_CACHE <- NULL
-  # Store logs in .txt only for shiny (non-rstudio)
-  if (!Sys.getenv("RSTUDIO") == "1") {
-    start_logging(DIRS$logs)
-  }
+  
+  # Display session ID in navbar
+  output$session_id_display <- renderUI({
+    session_id <- session$token
+    # Get a shorter version (first 8 characters)
+    short_id <- substr(session_id, 1, 8)
+    
+    tags$div(
+      class = "session-id-badge",
+      icon("fingerprint"),
+      tags$span(
+        paste0("Session: ", short_id),
+        title = paste0("Full Session ID: ", session_id)  # Show full ID on hover
+      )
+    )
+  })
+  
+  
+  # Cleanup on start
+  cleanup_old_analysis_dirs(DIRS$data, max_age_hours = 24)
 
   # Initialize data loading
   load_data_return <- load_data_server("load_data", DIRS, cfg)
@@ -189,26 +193,6 @@ server <- function(input, output, session) {
       module_initialized(TRUE)
       # Switch tabs after module is initialized
       updateNavbarPage(session, "main_navbar", selected = "primary")
-    }
-  })
-  
-  # Download logs handler
-  output$download_logs <- downloadHandler(
-    filename = function() {
-      paste0("app_logs_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
-    },
-    content = function(file) {
-      log_file <- file.path(DIRS$logs, "logs.txt")
-      file.copy(log_file, file)
-    }
-  )
-  
-  # Auto cleanup when session ends
-  session$onSessionEnded(function() {
-    if (dir.exists(DIRS$analysis)) {
-      stop_logging()
-      # unlink(DIRS$analysis, recursive = TRUE, force = TRUE)
-      # message("[SESSION END] Removed analysis dir: ", DIRS$analysis)
     }
   })
 }

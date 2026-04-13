@@ -257,27 +257,20 @@ load_new_palette <- function(file_path, palette_name, palette_dir) {
 }
 
 start_logging <- function(out_dir) {
-  log_file_path <- file.path(out_dir, "logs.txt")
-  
-  # Create connection
-  log_conn <- file(log_file_path, open = "wt")
-  
-  # Close existing sinks
-  if (sink.number(type = "output") > 0) sink(type = "output")
-  if (sink.number(type = "message") > 0) sink(type = "message")
-  
-  # Start sinks
-  sink(log_conn, type = "output", split = TRUE)
-  sink(log_conn, type = "message")
-  
-  # Store connection
-  assign(".log_conn", log_conn, envir = .GlobalEnv)
-  
-  # Disable ANSI colors
-  options(crayon.enabled = FALSE)
-  options(cli.num_colors = 1)
-  
-  cat("\n=== LOG STARTED", format(Sys.time()), "===\n\n")
+  tryCatch({
+    log_file_path <- file.path(out_dir, "logs.txt")
+    log_conn <- file(log_file_path, open = "wt")
+    if (sink.number(type = "output") > 0) sink(type = "output")
+    if (sink.number(type = "message") > 0) sink(type = "message")
+    sink(log_conn, type = "output", split = TRUE)
+    sink(log_conn, type = "message")
+    assign(".log_conn", log_conn, envir = .GlobalEnv)
+    options(crayon.enabled = FALSE)
+    options(cli.num_colors = 1)
+    cat("\n=== LOG STARTED", format(Sys.time()), "===\n\n")
+  }, error = function(e) {
+    warning("[Logging] Failed to start logging: ", e$message)
+  })
 }
 
 
