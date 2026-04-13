@@ -1,6 +1,3 @@
-library(plotly)
-library(RColorBrewer)
-
 generate_beta_boxplots <- function(array, beta, results_path) {
   message("Calculating boxplot statistics...")
   stats_list <- lapply(colnames(beta), function(sample) {
@@ -72,13 +69,11 @@ generate_beta_boxplots <- function(array, beta, results_path) {
       plot_bgcolor = "rgba(255, 255, 255, 1)",
       paper_bgcolor = "rgba(255, 255, 255, 1)"
     )
-  
-  # Guardar HTML
-  results_dir <- file.path(results_path, array)
-  dir.create(results_dir, showWarnings = FALSE, recursive = TRUE)
-  
-  html_path <- file.path(results_dir, paste0("beta_boxplot_", array, ".html"))
-  htmlwidgets::saveWidget(p, html_path, selfcontained = TRUE)
-  
+  # 
+  # # Guardar HTML
+  # results_dir <- file.path(results_path, array)
+  # html_path <- file.path(results_dir, paste0("beta_boxplot_", array, ".html"))
+  # htmlwidgets::saveWidget(p, html_path, selfcontained = TRUE)
+  # 
   return(p)
 }

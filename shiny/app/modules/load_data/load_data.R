@@ -1,13 +1,4 @@
-library(shinyjs)
-library(dplyr)
-library(archive)
-library(doParallel)
-library(foreach)
-suppressPackageStartupMessages(library(minfi))
-# shinyOptions(progress.style="old")
-# source("modules/css/load_data_css.R")
 source("modules/load_data/load_data_helper.R")
-
 
 load_data_ui <- function(id) {
   ns <- NS(id)
@@ -15,153 +6,309 @@ load_data_ui <- function(id) {
   tagList(
     shinyjs::useShinyjs(),
     
-    # --- TITLE ---
-    h2("Load Your Data", class = "text-center mb-4"),
+    # Custom CSS for better styling
+    tags$style(HTML("
+      .load-data-container {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        min-height: calc(100vh - 100px);
+      }
+      .load-card {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        cursor: pointer;
+      }
+      .load-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.15) !important;
+      }
+      .load-card.selected {
+        border: 2px solid #28a745 !important;
+        background-color: #f0fff4 !important;
+      }
+      .step-indicator {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 30px;
+      }
+      .step {
+        text-align: center;
+        flex: 1;
+        position: relative;
+      }
+      .step-number {
+        width: 40px;
+        height: 40px;
+        background: #dee2e6;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        margin-bottom: 10px;
+      }
+      .step.active .step-number {
+        background: #0d6efd;
+        color: white;
+      }
+      .step.completed .step-number {
+        background: #28a745;
+        color: white;
+      }
+      .step-label {
+        font-size: 14px;
+        color: #6c757d;
+      }
+      .step.active .step-label {
+        color: #0d6efd;
+        font-weight: bold;
+      }
+      .step.completed .step-label {
+        color: #28a745;
+      }
+      .step:not(:last-child):before {
+        content: '';
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        width: 100%;
+        height: 2px;
+        background: #dee2e6;
+        z-index: -1;
+      }
+      .step.completed:not(:last-child):before {
+        background: #28a745;
+      }
+      .console-log {
+        background: #1e1e1e;
+        color: #d4d4d4;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        border-radius: 8px;
+        text-align: left;
+      }
+    ")),
     
-    # --- MESSAGE ALERTS ---
-    uiOutput(ns("alert_message")),
-    
-    # --- Main view  ---
     div(
-      style = "max-width: 900px; width: 100%;",
-      id = ns("ld_main_view"),
-      class = "p-4 border rounded shadow-sm bg-light",
-      p("Select the type of files you want to load:", class = "text-center text-muted mb-4"),
+      class = "load-data-container p-5",
       
-      # Selection buttons centered
+      # Title
       div(
-        class = "d-flex justify-content-center gap-4 mb-5",
-        style = "flex-wrap: wrap;",
-        actionButton(
-          ns("load_beta"), 
-          "Beta Matrix\n+ Targets file", 
-          class = "btn btn-primary btn-lg",
-          style = "width: 280px; height: 280px; font-size: 18px; border-radius: 8px;"
+        class = "text-center mb-5",
+        h2(icon("database"), " Load Your Data", class = "mb-2"),
+        p("Upload methylation data to begin analysis", class = "text-muted")
+      ),
+      
+      # Step indicators
+      div(
+        class = "step-indicator mb-5",
+        div(
+          class = "step active",
+          div(class = "step-number", "1"),
+          div(class = "step-label", "Select Type")
         ),
-        actionButton(
-          ns("load_idats"), 
-          "IDATS\n+ Samplesheet",
-          class = "btn btn-primary btn-lg",
-          style = "width: 280px; height: 280px; font-size: 18px; border-radius: 8px;"
+        div(
+          id = ns("step2"),
+          class = "step",
+          div(class = "step-number", "2"),
+          div(class = "step-label", "Upload Files")
+        ),
+        div(
+          id = ns("step3"),
+          class = "step",
+          div(class = "step-number", "3"),
+          div(class = "step-label", "Process Data")
         )
       ),
       
-      # File upload centered
-      div(
-        class = "d-flex justify-content-center mb-4",
-        uiOutput(ns('zipfile_ui'))
-      ),
+      # Message Alerts
+      uiOutput(ns("alert_message")),
       
-      # Load Data button - bigger and centered with spinner
+      # Main view container
       div(
-        class = "text-center",
-        style = "position: relative;",
-        actionButton(
-          inputId = ns("confirm_load"),
-          label = "Load Data",
-          class = "btn btn-success btn-lg",
-          style = "width: 280px; height: 60px; font-size: 18px; border-radius: 8px; position: relative;",
-          disabled = TRUE
-        ),
-        # Spinner overlay (hidden by default)
+        id = ns("ld_main_view"),
+        class = "card shadow-lg",
+        style = "max-width: 900px; margin: 0 auto; border-radius: 12px;",
+        
         div(
-          id = ns("load_spinner"),
-          class = "spinner-border spinner-border-sm text-primary",
-          role = "status",
-          style = "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; z-index: 10;",
-          span(class = "visually-hidden", "Loading...")
-        )
-      )
-    ),
-    
-    # --- IDATS View ---
-    shinyjs::hidden(
-      div(
-        id = ns("ld_idats_view"),
-        class = "p-4 border rounded shadow-sm bg-light",
-        h3("Detected IDAT Samples", class = "text-center mb-4"),
-        
-        # Select all checkbox
-        div(
-          class = "text-center mb-3",
-          checkboxInput(ns("select_all"), "Select all samples", value = FALSE)
-        ),
-        
-        # DataTable
-        DTOutput(ns("idat_table")),
-        br(),
-        
-        # Normalization + detection threshold + CPU selectors
-        fluidRow(
-          column(
-            width = 4,
-            selectInput(
-              ns("normalization"), 
-              "Normalization method:", 
-              choices = c("ssnoob", "raw", "illumina", "quantile", "funnorm"), 
-              selected = "ssnoob"
+          class = "card-body p-5",
+          
+          p("Select the type of files you want to load:", 
+            class = "text-center text-muted mb-4"),
+          
+          # Selection cards
+          div(
+            class = "d-flex justify-content-center gap-4 mb-5",
+            style = "flex-wrap: wrap;",
+            
+            # Beta Matrix card
+            div(
+              id = ns("card_beta"),
+              class = "load-card card text-center p-4",
+              style = "width: 280px; cursor: pointer; border-radius: 12px;",
+              onclick = sprintf("Shiny.setInputValue('%s', 'beta', {priority: 'event'})", ns("select_type")),
+              div(
+                class = "card-body",
+                icon("table", class = "fa-4x mb-3", style = "color: #0d6efd;"),
+                h4("Beta Matrix", class = "card-title mb-2"),
+                p("Upload pre-computed beta matrices", class = "text-muted small"),
+                p("+ Targets file", class = "text-muted small mt-2")
+              )
+            ),
+            
+            # IDATs card
+            div(
+              id = ns("card_idats"),
+              class = "load-card card text-center p-4",
+              style = "width: 280px; cursor: pointer; border-radius: 12px;",
+              onclick = sprintf("Shiny.setInputValue('%s', 'idats', {priority: 'event'})", ns("select_type")),
+              div(
+                class = "card-body",
+                icon("microchip", class = "fa-4x mb-3", style = "color: #6f42c1;"),
+                h4("IDAT Files", class = "card-title mb-2"),
+                p("Upload raw IDAT files", class = "text-muted small"),
+                p("+ Sample sheet", class = "text-muted small mt-2")
+              )
             )
           ),
-          column(
-            width = 4,
-            uiOutput(ns("cpu_selector")),
-            textOutput(ns("available_cores_text"))
-          )
-        ),
-        br(),
-        
-        # Run QC button
-        div(
-          class = "text-center",
-          actionButton(
-            ns("run_qc"), 
-            "Run QC", 
-            class = "btn btn-primary btn-lg",
-            style = "width: 280px; height: 60px; font-size: 18px; border-radius: 8px;"
+          
+          # File upload section
+          div(
+            id = ns("upload_section"),
+            class = "text-center",
+            style = "display: none;",
+            div(
+              class = "border-top pt-4",
+              h5(icon("upload"), " Upload ZIP files", class = "mb-3"),
+              div(
+                style = "display: flex; justify-content: center; width: 100%;",
+                div(
+                  style = "width: auto;",
+                  uiOutput(ns('zipfile_ui'))
+                )
+              ),
+              p(class = "text-muted small mt-2", 
+                "Supported formats: .zip files containing either:",
+                tags$br(),
+                "- For Beta mode: CSV files with beta values + targets file",
+                tags$br(),
+                "- For IDATs mode: Raw IDAT files + sample sheet"
+              )
+            )
+          ),
+          
+          # Load Data button
+          div(
+            class = "text-center mt-4",
+            actionButton(
+              inputId = ns("confirm_load"),
+              label = tagList(icon("play"), " Load Data"),
+              class = "btn btn-success btn-lg px-5",
+              style = "border-radius: 25px; font-weight: bold;",
+              disabled = TRUE
+            )
           )
         )
-      )
-    ),
-    
-    # --- QC VIEW ---
-    shinyjs::hidden(
-      div(
-        id = ns("ld_qc_view"),
-        class = "content-section",
-        uiOutput(ns("qc_threshold_tabs")),
-        br(),
+      ),
+      
+      # IDATS View (hidden initially)
+      shinyjs::hidden(
         div(
-          class = "text-center",
-          actionButton(
-            ns("qc_continue"),
-            "Generate Beta Matrix",
-            class = "btn btn-primary btn-lg",
-            style = "width: 280px; height: 60px; font-size: 18px; border-radius: 8px;"
+          id = ns("ld_idats_view"),
+          class = "card shadow-lg",
+          style = "max-width: 1200px; margin: 0 auto; border-radius: 12px;",
+          
+          div(
+            class = "card-body p-4",
+            h3(icon("microchip"), " Detected IDAT Samples", class = "mb-4"),
+            
+            # Select all checkbox
+            div(
+              class = "mb-3",
+              checkboxInput(ns("select_all"), "Select all samples", value = FALSE)
+            ),
+            
+            # DataTable
+            DTOutput(ns("idat_table")),
+            br(),
+            
+            # Configuration panel
+            div(
+              class = "bg-light p-4 rounded",
+              h5(icon("sliders-h"), " Configuration", class = "mb-3"),
+              fluidRow(
+                column(
+                  width = 6,
+                  selectInput(
+                    ns("normalization"), 
+                    "Normalization method:", 
+                    choices = c("ssnoob", "raw", "illumina", "quantile", "funnorm"), 
+                    selected = "ssnoob"
+                  )
+                ),
+                column(
+                  width = 6,
+                  uiOutput(ns("cpu_selector"))
+                )
+              )
+            ),
+            br(),
+            
+            # Run QC button
+            div(
+              class = "text-center",
+              actionButton(
+                ns("run_qc"), 
+                tagList(icon("chart-line"), " Run QC"), 
+                class = "btn btn-primary btn-lg px-5",
+                style = "border-radius: 25px; font-weight: bold;"
+              )
+            )
           )
         )
-      )
-    ),
-    
-    
-    # --- LOADING View ---
-    shinyjs::hidden(
-      div(
-        id = ns("ld_loading_view"),
-        class = "text-center p-5",
-        
-        # Bootstrap spinner
+      ),
+      
+      # QC VIEW (hidden initially)
+      shinyjs::hidden(
         div(
-          class = "spinner-border text-primary",
-          role = "status",
-          style = "width: 5rem; height: 5rem;"
-        ),
-        # TODO: A CONSOLE THAT SHOWS THE MESSAGES THAT WE ARE PRINTING, 
-        # ALSO IT SHOULD SAVE THE LOG INTO A LOG.TXT FILE
+          id = ns("ld_qc_view"),
+          class = "card shadow-lg",
+          style = "border-radius: 12px;",
+          
+          div(
+            class = "card-body p-4",
+            h3(icon("check-circle"), " Quality Control", class = "mb-4"),
+            uiOutput(ns("qc_threshold_tabs")),
+            br(),
+            div(
+              class = "text-center",
+              actionButton(
+                ns("qc_continue"),
+                tagList(icon("arrow-right"), " Generate Beta Matrix"),
+                class = "btn btn-success btn-lg px-5",
+                style = "border-radius: 25px; font-weight: bold;"
+              )
+            )
+          )
+        )
+      ),
+      
+      # LOADING View
+      shinyjs::hidden(
         div(
-          style = "border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; background-color: #f7f7f7;",
-          id = "console_log"
-        ),
-        br(), br(),
+          id = ns("ld_loading_view"),
+          class = "card shadow-lg text-center p-5",
+          style = "max-width: 800px; margin: 0 auto; border-radius: 12px;",
+          
+          div(
+            style = "display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px;",
+            
+            div(
+              class = "spinner-border text-primary",
+              role = "status",
+              style = "width: 4rem; height: 4rem; margin-bottom: 20px;"
+            ),
+            h4("Processing...", class = "mt-3 mb-3")
+          )
+        )
       )
     )
   )
@@ -169,22 +316,11 @@ load_data_ui <- function(id) {
 
 
 # --- SERVER ---
-load_data_server <- function(id) {
+load_data_server <- function(id, DIRS, cfg) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
-    data_dir <- file.path(getwd(), "data")
-    if (!dir.exists(data_dir)) dir.create(data_dir)
-    filter_dir <- reactiveVal(file.path(getwd(), "common_files", "filter"))
-    
     # --- REACTIVE VALUES ---
-    # Directories
-    analysis_dir <- reactiveVal(NULL) 
-    input_dir <- reactiveVal(NULL)
-    results_dir <- reactiveVal(NULL)
-    preprocessing_dir <- reactiveVal(NULL)
-    qc_dir <- reactiveVal(NULL)
-    beta_dir <- reactiveVal(NULL)
     samples_df <- reactiveVal(data.frame())
     type_selected <- reactiveVal(NULL)
     alert_message <- reactiveVal(NULL)
@@ -192,11 +328,10 @@ load_data_server <- function(id) {
     # QC reactive values
     qc_results <- reactiveVal(list())
     array_names <- reactiveVal(list())
-
+    
     # Beta reactive values
-    beta_list <- reactiveVal(list())
+    mSetSq_list <- reactiveVal(list())
     beta_merged <- reactiveVal(NULL)
-    targets_list <- reactiveVal(list())
     targets_merged <- reactiveVal(NULL)
     
     # --- RENDER ZIP FILE ---
@@ -222,22 +357,28 @@ load_data_server <- function(id) {
       )
     })
     
-    # --- CPU SELECTOR ---
-    available_cores <- parallel::detectCores()
-    output$cpu_selector <- renderUI({
-      sliderInput(
-        ns("cores_selected"),
-        "Select number of CPUs to use:",
-        min = 1,
-        max = available_cores,
-        value = min(available_cores, 4),
-        step = 1
-      )
+    # Handle card selection
+    observeEvent(input$select_type, {
+      if (input$select_type == "beta") {
+        type_selected("BETA")
+        shinyjs::removeClass("card_beta", "selected")
+        shinyjs::addClass("card_beta", "selected")
+        shinyjs::removeClass("card_idats", "selected")
+      } else if (input$select_type == "idats") {
+        type_selected("IDATS")
+        shinyjs::removeClass("card_idats", "selected")
+        shinyjs::addClass("card_idats", "selected")
+        shinyjs::removeClass("card_beta", "selected")
+      }
+      
+      # Show upload section
+      shinyjs::show("upload_section")
+      
+      # Update step indicators
+      shinyjs::addClass("step2", "active")
+      shinyjs::removeClass("step", "active", selector = ".step:first-child")
     })
     
-    output$available_cores_text <- renderText({
-      paste("Detected", available_cores, "available CPU cores")
-    })
     
     # --- IDAT TABLE ---
     output$idat_table <- DT::renderDataTable({
@@ -291,81 +432,93 @@ load_data_server <- function(id) {
       shinyjs::hide("ld_main_view")
       shinyjs::show("ld_loading_view")
       
-      withProgress(message = "Loading data", {
-        
-        incProgress(0.1, detail = "Preparing directories...")
-        
-        # Create all required folders
-        current_time <- format(Sys.time(), "%Y%m%d_%H%M%S")
-        
-        incProgress(0.2, detail = "Creating directory structure...")
-        filter_path <- file.path()
-        analysis_path <- file.path(data_dir, paste0("analysis_", current_time))
-        analysis_path <- create_dir(analysis_path)
-        input_path <- create_dir(file.path(analysis_path, "input"))
-        results_path <- create_dir(file.path(analysis_path, "results"))
-        preprocessing_path <- create_dir(file.path(results_path, "1-preprocessing"))
-        qc_path <- create_dir(file.path(results_path, "2-qc"))
-        beta_path <- create_dir(file.path(results_path, "3-beta"))
-        
-        # Assign to the reactive values
-        analysis_dir(analysis_path)
-        input_dir(input_path)
-        results_dir(results_path)
-        preprocessing_dir(preprocessing_path)
-        qc_dir(qc_path)
-        beta_dir(beta_path)
-        
-        tryCatch({
-          incProgress(0.5, detail = "Extracting files from zip...")
+      tryCatch({
+        withProgress(message = "Loading data", {
+          
+          incProgress(0.1, detail = "Extracting files from zip...")
           zip_paths <- input$zipfile$datapath
-          archive::archive_extract(zip_paths, dir = input_dir())
+          archive::archive_extract(zip_paths, dir = DIRS$input)
           
           if (type_selected() == "IDATS") {
-            incProgress(0.9, detail = "Generating Sample IDAT Summary..")
-            idats_dir <- parse_idat_files(input_dir(), preprocessing_dir())
-            order_idat_per_array(idats_dir, preprocessing_dir())
-            temp_df <- generate_idat_dataframe(preprocessing_dir())
+            incProgress(0.3, detail = "Organizing IDAT files...")
+            
+            # Create idats folder and copy all IDATs there
+            idats_dir <- parse_idat_files(DIRS$input, DIRS$preprocessing)
+            
+            incProgress(0.5, detail = "Classifying by array type...")
+            
+            # Now organize by array type
+            order_idat_per_array(idats_dir, DIRS$preprocessing)
+            
+            incProgress(0.8, detail = "Generating sample summary...")
+            temp_df <- generate_idat_dataframe(DIRS$preprocessing)
+            
+            if (nrow(temp_df) == 0) {
+              stop("No valid IDAT samples detected after classification")
+            }
+            
             samples_df(temp_df)
             
-            # Show IDATS view
             incProgress(1.0, detail = "Complete!")
+            
           } else if (type_selected() == "BETA") {
             incProgress(0.5, detail = "Extracting BETA files...")
-            beta_and_targets <- extract_beta_and_targets(input_dir(), beta_dir())
-            beta_list(beta_and_targets$beta)
-            targets_list(beta_and_targets$targets)
+            beta_and_targets <- extract_beta_and_targets(DIRS$input, DIRS$beta)
+            beta_merged(beta_and_targets$beta)
+            targets_merged(beta_and_targets$targets)
             incProgress(1.0, detail = "Complete!")
+            
+            shinyjs::hide("ld_loading_view")
+            updateNavbarPage(session, "main_navbar", selected = "primary")
+            
+            # Return only using beta and targets
+            return(list(
+              array_names_ld = array_names,
+              mSetSq_list_ld = mSetSq_list,
+              beta_merged_ld= beta_merged,
+              targets_merged_ld = targets_merged
+            ))
           }
-        }, error = function(e) {
-          # Remove created analysis directory if it exists
-          # TODO: Leave it commented for testing
-          # if (dir.exists(analysis_dir)) {
-          #   unlink(analysis_dir, recursive = TRUE, force = TRUE)
-          # }
-          
-          # Reset the ZIP upload input 
-          output$zipfile_ui <- renderUI({
-            fileInput(
-              inputId = ns("zipfile"),
-              label = "Upload your ZIP files",
-              accept = ".zip",
-              multiple = TRUE,
-              width = "280px"
-            )
-          })          
-          alert_message(list(
-            type = "error",
-            text = paste("Processing failed:", e$message)
-          ))
         })
-      })
-      
-      # Change views
-      if (type_selected() == "IDATS") {
+        
+        # Only hide loading and show next view on success
+        if (type_selected() == "IDATS") {
+          shinyjs::hide("ld_loading_view")
+          shinyjs::show("ld_idats_view")
+        }
+        
+      }, error = function(e) {
+        message("Error during data loading: ", e$message)
+        
+        # Reset UI to main view
         shinyjs::hide("ld_loading_view")
-        shinyjs::show("ld_idats_view")
-      }
+        shinyjs::hide("ld_idats_view")
+        shinyjs::hide("ld_qc_view")
+        shinyjs::show("ld_main_view")
+        
+        # Reset type selection
+        type_selected(NULL)
+        shinyjs::removeClass("card_beta", "selected")
+        shinyjs::removeClass("card_idats", "selected")
+        shinyjs::hide("upload_section")
+        
+        # Reset file input
+        output$zipfile_ui <- renderUI({
+          fileInput(
+            inputId = ns("zipfile"),
+            label = "Upload your ZIP files",
+            accept = ".zip",
+            multiple = TRUE,
+            width = "280px"
+          )
+        })
+        
+        # Show error message
+        alert_message(list(
+          type = "error",
+          text = paste("Processing failed:", e$message)
+        ))
+      })
     })
     
     # --- SELECT ALL ---
@@ -392,12 +545,14 @@ load_data_server <- function(id) {
         
         tryCatch({
           selected_idats <- input$idat_table_rows_selected
-          separate_unselected_idats(samples_df(), selected_idats, preprocessing_dir())
-          parse_samplesheets(input_dir(), preprocessing_dir())
+          separate_unselected_idats(samples_df(), selected_idats, DIRS$preprocessing)
+          parse_samplesheets(DIRS$input, DIRS$preprocessing)
+          # Mid processing clean up
+          unlink(DIRS$input)
           
           incProgress(0.5, detail = "Generating Quality Control metrics for all arrays...")
           
-          qc_res_temp <- load_qc_data_for_arrays(input$cores_selected, preprocessing_dir(), qc_dir())
+          qc_res_temp <- load_qc_data_for_arrays_batch(DIRS$preprocessing, DIRS$qc)
           qc_results(qc_res_temp$qc_results)
           array_names(qc_res_temp$arrays_used)
           
@@ -440,7 +595,7 @@ load_data_server <- function(id) {
           fluidRow(
             column(
               width = 9,
-              plotlyOutput(
+              plotOutput(  # Changed from plotlyOutput to plotOutput
                 outputId = ns(paste0("ld_qc_barplot_", arr)),
                 height = "600px"
               )
@@ -465,68 +620,116 @@ load_data_server <- function(id) {
       )
     })
     
-    # -- QC TABS VIEW LOGIC ---
+    
+    # --- QC TABS VIEW LOGIC (Load on demand) ---
+    # Create reactive values to store loaded data for each array
+    loaded_qc_data <- reactiveValues()
+    
     observe({
       req(qc_results(), array_names())
       
-      lapply(array_names(), function(arr) {
+      # Observe tab changes
+      observeEvent(input$qc_threshold_tabset, {
+        current_array <- input$qc_threshold_tabset
+        req(current_array)
         
-        local({
-          array    <- arr
-          plot_id  <- paste0("ld_qc_barplot_", array)
-          stats_id <- paste0("ld_qc_stats_", array)
-          thr_id   <- paste0("ld_qc_threshold_", array)
+        # Check if this array's data is already loaded
+        if (is.null(loaded_qc_data[[current_array]])) {
+          message("Loading ", current_array, " data from disk...")
           
-          # ---- Plot ----
-          output[[plot_id]] <- renderPlotly({
-            req(input[[thr_id]])
-            
-            detP  <- qc_results()$detections[[array]]
-            rgSet <- qc_results()$rgsets[[array]]
-            thr   <- as.numeric(input[[thr_id]])
-            
-            p <- generate_detection_p_barplot(
-              array     = array,
-              rgSet     = rgSet,
-              detP      = detP,
-              threshold = thr
-            )
-            
-            ggplotly(p)
-          })
+          # Load from disk
+          rgset_path <- qc_results()$rgsets[[current_array]]
+          detp_path <- qc_results()$detections[[current_array]]
           
-          # ---- QC stats box ----
-          output[[stats_id]] <- renderUI({
-            req(input[[thr_id]])
-            
-            detP <- qc_results()$detections[[array]]
-            thr  <- as.numeric(input[[thr_id]])
-            
-            failed_perc <- colSums(detP > thr) / nrow(detP) * 100
-            keep        <- colMeans(detP) < thr
-            
-            tagList(
-              div(
-                class = "border rounded p-3 bg-light",
-                
-                h5("QC summary"),
-                
-                p(strong("Threshold: "), thr),
-                p(
-                  strong("Mean failed probes (%): "),
-                  sprintf("%.2f", mean(failed_perc))
-                ),
-                p(
-                  strong("Max failed probes (%): "),
-                  sprintf("%.2f", max(failed_perc))
-                ),
-                p(
-                  strong("Samples failing QC: "),
-                  sum(!keep)
-                )
+          full_rgSet <- readRDS(rgset_path)
+          full_detP <- readRDS(detp_path)
+          
+          # Calculate mean detection p-values for all samples
+          mean_detP <- colMeans(full_detP, na.rm = TRUE)
+          
+          # Get indices of top 100 samples with highest mean detection p-values
+          top_n <- min(100, ncol(full_detP))
+          top_indices <- order(mean_detP, decreasing = TRUE)[1:top_n]
+          
+          # Subset both objects to only keep the top 50 samples
+          rgSet_subset <- full_rgSet[, top_indices]
+          detP_subset <- full_detP[, top_indices]
+          
+          # Store ONLY the subsetted data in reactiveValues
+          loaded_qc_data[[current_array]] <- list(
+            rgSet = rgSet_subset,
+            detP = detP_subset,
+            total_samples = ncol(full_rgSet),  # Store total count for reference
+            kept_samples = top_n
+          )
+          
+          # Clean up full objects to free memory immediately
+          rm(full_rgSet, full_detP, mean_detP)
+          gc()
+          
+          message("Loaded and subsetted ", current_array, " - RGSet size: ", 
+                  format(object.size(loaded_qc_data[[current_array]]$rgSet), units = "auto"),
+                  " (kept ", top_n, " of ", loaded_qc_data[[current_array]]$total_samples, " samples)")
+        }
+        
+        # Get the data for current array
+        current_data <- loaded_qc_data[[current_array]]
+        
+        # Plot output
+        plot_id <- paste0("ld_qc_barplot_", current_array)
+        output[[plot_id]] <- renderPlot({
+          thr_id <- paste0("ld_qc_threshold_", current_array)
+          req(input[[thr_id]], current_data$rgSet, current_data$detP)
+          
+          thr <- as.numeric(input[[thr_id]])
+          
+          generate_detection_p_barplot_subset(
+            array     = current_array,
+            rgSet     = current_data$rgSet,
+            detP      = current_data$detP,
+            threshold = thr,
+            total_samples = current_data$total_samples,
+            kept_samples = current_data$kept_samples
+          )
+        })
+        
+        # Stats output
+        stats_id <- paste0("ld_qc_stats_", current_array)
+        output[[stats_id]] <- renderUI({
+          thr_id <- paste0("ld_qc_threshold_", current_array)
+          req(input[[thr_id]], current_data$detP)
+          
+          thr <- as.numeric(input[[thr_id]])
+          
+          failed_perc <- colSums(current_data$detP > thr) / nrow(current_data$detP) * 100
+          keep <- colMeans(current_data$detP) < thr
+          
+          tagList(
+            div(
+              class = "border rounded p-3 bg-light",
+              
+              h5("QC summary"),
+              
+              p(strong("Threshold: "), thr),
+              p(
+                strong("Mean failed probes (%): "),
+                sprintf("%.2f", mean(failed_perc))
+              ),
+              p(
+                strong("Max failed probes (%): "),
+                sprintf("%.2f", max(failed_perc))
+              ),
+              p(
+                strong("Samples failing QC (in top 100): "),
+                sum(!keep), " / ", length(keep)
+              ),
+              hr(),
+              p(
+                em(sprintf("Showing top %d samples with highest mean detection p-values (out of %d total samples)", 
+                           current_data$kept_samples, current_data$total_samples))
               )
             )
-          })
+          )  
         })
       })
     })
@@ -534,44 +737,46 @@ load_data_server <- function(id) {
     
     # --- QC CONTINUE ---
     observeEvent(input$qc_continue, {
-      # ---- Move forward ----
       shinyjs::hide("ld_qc_view")
       shinyjs::show("ld_loading_view")
       
       arrays <- array_names()
-      qc_res <- qc_results()
       
-      # Save output
-      n_arrays <- length(arrays)
-      processed_results <- vector("list", n_arrays)
-      names(processed_results) <- arrays      
+      # Store paths to beta matrices instead of objects
+      beta_paths <- c()
+      processed_results_paths <- list()
       
       tryCatch({
-        
         for (array in arrays) {
-          message("Saving QC results for array: ", array)
-          array_qc_dir <- file.path(qc_dir(), array)
+          message("\n=== Processing beta for ", array, " ===")
           
-          # ---- Get threshold selected for THIS array ----
+          array_qc_dir <- file.path(DIRS$qc, array)
+          
+          # Get threshold selected for THIS array
           thr_id <- paste0("ld_qc_threshold_", array)
           thr <- as.numeric(input[[thr_id]])
           
-          detP  <- qc_res$detections[[array]]
-          rgSet <- qc_res$rgsets[[array]]
+          # LOAD FROM DISK instead of using stored objects
+          rgset_path <- qc_results()$rgsets[[array]]
+          detp_path <- qc_results()$detections[[array]]
           
-          # Save Percentage of failed probes
+          message("Loading from disk: ", basename(rgset_path))
+          rgSet <- readRDS(rgset_path)
+          detP <- readRDS(detp_path)
+          
+          message("Loaded RGSet size: ", format(object.size(rgSet), units = "auto"))
+          
+          # Save QC files (percentage failed, plot)
           failed_perc <- colSums(detP > thr) / nrow(detP) * 100
           
           csv_file <- file.path(
             array_qc_dir,
-            sprintf(
-              "1.1-Percentage_of_failed_probes_by_sample_detection_p_%.2f_%s.csv",
-              thr, array
-            )
+            sprintf("1.1-Percentage_of_failed_probes_by_sample_detection_p_%.2f_%s.csv",
+                    thr, array)
           )
           write.csv(failed_perc, file = csv_file, quote = FALSE, row.names = TRUE)
           
-          # ---- Save QC plot ----
+          # Generate and save QC plot
           p <- generate_detection_p_barplot(
             array     = array,
             rgSet     = rgSet,
@@ -581,46 +786,42 @@ load_data_server <- function(id) {
           
           plot_file <- file.path(
             array_qc_dir,
-            sprintf(
-              "1.0-Detection_P_barplot_threshold_%.2f_%s.png",
-              thr, array
-            )
+            sprintf("1.0-Detection_P_barplot_threshold_%.2f_%s.png", thr, array)
           )
           ggsave(filename = plot_file, plot = p, width = 12, height = 6, dpi = 300)
+          rm(p, failed_perc)
           
-          # ---- Store threshold ----
-          qc_res$threshold_selected[[array]] <- thr
-          
-          
-          # --- Generate Beta matrix ---
-          processed_results[[array]] <- generate_beta_matrix(
-            cores       = input$cores_selected,
+          # Generate Beta matrix
+          message("Generating beta matrix for ", array, "...")
+          result_paths <- generate_beta_matrix(
             array       = array,
-            rgSet       = qc_res$rgsets[[array]],
-            detP        = qc_res$detections[[array]],
+            rgSet       = rgSet,
+            detP        = detP,
             norm_method = input$normalization,
-            threshold   = qc_res$threshold_selected[[array]],
-            filter_dir  = filter_dir(),
-            beta_dir    = beta_dir()
+            threshold   = thr,
+            filter_dir  = DIRS$filter,
+            beta_dir    = DIRS$beta
           )
           
-          # Store beta on list
-          bl <- beta_list()
-          bl[[array]] <- processed_results$beta
-          beta_list(bl)
+          # Store the paths
+          beta_paths <- c(beta_paths, result_paths$beta_path)
+          current_list <- mSetSq_list()
+          current_list[[array]] <- result_paths$mset_path
+          mSetSq_list(current_list)
         }
         
-        qc_results(qc_res)
+        # Create merge directory
+        beta_merge_dir <- create_dir(file.path(DIRS$beta, "merged"))
         
-        # Merge Beta matrices
-        beta_merge_dir <- create_dir(file.path(beta_dir(), "merged"))
-        beta_mg <- merge_beta_matrix(processed_results, beta_merge_dir)
+        # Merge Beta matrices from disk (only loads one at a time)
+        message("\nMerging beta matrices from disk...")
+        beta_mg <- merge_beta_matrix_from_disk(beta_paths, beta_merge_dir)
         beta_merged(beta_mg)
         
         # Merge targets file
-        targets_result <- merge_samplesheets(arrays, preprocessing_dir(), beta_merge_dir)
-        targets_list(targets_result$targets_individual)
-        targets_merged(targets_result$targets_merged)    
+        message("\nMerging sample sheets...")
+        targets_result <- merge_samplesheets(arrays, DIRS$preprocessing, beta_merge_dir)
+        targets_merged(targets_result$targets_merged)
         
         message("QC and beta generation completed successfully")
         
@@ -630,19 +831,19 @@ load_data_server <- function(id) {
           text = paste("Generating Beta matrix failed:", e$message)
         ))
       })
+      
+      # Clean up loaded QC data to free memory
+      loaded_qc_data <- reactiveValues()
+      
+      shinyjs::hide("ld_loading_view")
+      updateNavbarPage(session, "main_navbar", selected = "primary")
     })
     
     return(list(
-      analysis_dir = analysis_dir,
-      results_dir = results_dir,
-      qc_dir = qc_dir,
-      beta_dir = beta_dir,
-      qc_results = qc_results,
-      array_names = array_names,
-      beta_list = beta_list,
-      beta_merged = beta_merged,
-      targets_list = targets_list,
-      targets_merged = targets_merged
+      array_names_ld = array_names,
+      mSetSq_list_ld = mSetSq_list,
+      beta_merged_ld= beta_merged,
+      targets_merged_ld = targets_merged
     ))
   })
 }

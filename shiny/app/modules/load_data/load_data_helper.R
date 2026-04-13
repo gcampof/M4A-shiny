@@ -1,25 +1,10 @@
-# === load_data_helper.R ===
-library(minfi)
-library(DMRcate)
-library(readxl)
-library(tools)
-library(readr)
-library(limma)
-library(doParallel)
-library(foreach)
-library(ggplot2)
-library(plotly)
-library(DT)
-library(IlluminaHumanMethylationEPICv2manifest)
-library(IlluminaHumanMethylationEPICv2anno.20a1.hg38)
-
-
 ARRAY_SUPPORTED <- list(
   `450K` = c("450k", "450", "hm450", "hm_450", "illumina 450k"),
   EPIC = c("epic","epicv1", "epic_v1", "epic_1", "epic v1", "epicv.1"),
   EPIC_V2 = c("epicv2", "epic_v2", "epic_2", "epic v2", "epicv.2")
 )
 
+# === load_data_helper.R ===
 col_vector<-c(
   "#0d570b", "#54c40a", "#E41A1C", "#d97009", "#52367d", "#874c23", "#bfa21d",
   "#6998b5", "#8c8b8b", "#03465e",  "#e080c3", "#9d83d6", "#14b89c", "#2a4880",
@@ -33,7 +18,6 @@ col_vector<-c(
   "#E5D8BD", "#6A3D9A", "#1B9E77", "#FFED6F", "#B3CDE3", "#A65628", "#FDCDAC",
   "#BEAED4", "#999999", "#F1E2CC"
 )
-
 
 
 # Creates the new directory and returns the path
@@ -56,64 +40,30 @@ get_array_synonims <- function(){
 
 is_samplesheet <- function(cols) {
   cols <- tolower(cols)
-  any(
-    c(
-      "array", "slide", "sentrixid", "sentrix_id",
-      "sentrixposition", "sentrix_position",
-      "sentrixidposition"
-    ) %in% cols
-  )
+  # Just need at least one identifier column
+  any(c("basename", "sentrixid", "sentrix_id") %in% cols)
 }
 
 
 normalize_array_type <- function(x) {
   if (is.na(x) || !nzchar(x)) return(NA_character_)
-  x <- tolower(trimws(x))
+  
+  # Store original for debugging if needed
+  original_x <- x
+  
+  # Convert to lowercase for comparison only
+  x_lower <- tolower(trimws(x))
   
   for (array_type in names(ARRAY_SUPPORTED)) {
-    # Strict equality against the synonyms
+    # Get synonyms and convert to lowercase for comparison
     synonyms <- tolower(trimws(ARRAY_SUPPORTED[[array_type]]))
-    if (x %in% synonyms) {
+    if (x_lower %in% synonyms) {
+      # Return the array_type as is (preserves original case)
       return(array_type)
     }
   }
   
   NA_character_
-}
-
-
-idat_exists <- function(slide, array, array_type, preprocessing_dir) {
-  dir <- file.path(preprocessing_dir, array_type)
-  if (!dir.exists(dir)) return(FALSE)
-  
-  pattern <- paste0("^", slide, "_", array, "_.*\\.idat$")
-  
-  length(
-    list.files(
-      dir,
-      pattern = pattern,
-      ignore.case = TRUE
-    )
-  ) > 0
-}
-
-
-
-parse_idat_files<- function(input_dir, preprocessing_dir) {
-  # Find all IDAT files (including subdirectories)
-  idat_files <- list.files(input_dir, pattern = "\\.idat$", full.names = TRUE, 
-                           recursive = TRUE, ignore.case = TRUE)
-  if (length(idat_files) == 0) stop("No IDAT files found in the input directory.")
-  
-  # Create idats folder
-  idats_dir <- create_dir(file.path(preprocessing_dir, "idats"))
-  
-  # Copy IDATs to idats folder
-  for (idat_file in idat_files) {
-    file.copy(idat_file, file.path(idats_dir, basename(idat_file)), 
-              overwrite = TRUE)
-  }
-  return(idats_dir)
 }
 
 
@@ -145,11 +95,246 @@ order_idat_per_array <- function(idats_dir, preprocessing_dir){
   idat_epic <- idat_files[idat_sizes > SIZE_450K_MAX & idat_sizes <= SIZE_EPIC_MAX]
   idat_epic_v2 <- idat_files[idat_sizes > SIZE_EPIC_MAX]
   
-  # TODO: This requires solid fallback in case the copy goes wrong needs to be notified
   file.rename(idat_450k, file.path(preprocessing_dir, "450K", basename(idat_450k)))
   file.rename(idat_epic, file.path(preprocessing_dir, "EPIC", basename(idat_epic)))
   file.rename(idat_epic_v2, file.path(preprocessing_dir, "EPIC_V2", basename(idat_epic_v2)))
 }
+
+
+
+idat_exists <- function(slide, array, array_type, preprocessing_dir) {
+  dir <- file.path(preprocessing_dir, array_type)
+  if (!dir.exists(dir)) return(FALSE)
+  
+  pattern <- paste0("^", slide, "_", array, "_.*\\.idat$")
+  
+  length(
+    list.files(
+      dir,
+      pattern = pattern,
+      full.names = FALSE,
+      ignore.case = TRUE
+    )
+  ) > 0
+}
+
+parse_idat_files <- function(input_dir, preprocessing_dir) {
+  # Find all IDAT files (including .idat.gz)
+  idat_files <- list.files(
+    input_dir, 
+    pattern = "\\.idat(\\.gz)?$", 
+    full.names = TRUE, 
+    recursive = TRUE, 
+    ignore.case = TRUE
+  )
+  
+  if (length(idat_files) == 0) {
+    stop("No IDAT files found in the input directory.")
+  }
+  
+  # Create idats folder
+  idats_dir <- create_dir(file.path(preprocessing_dir, "idats"))
+  
+  # Copy and decompress if needed
+  for (idat_file in idat_files) {
+    if (grepl("\\.gz$", idat_file, ignore.case = TRUE)) {
+      # Decompress .idat.gz
+      output_file <- file.path(idats_dir, sub("\\.gz$", "", basename(idat_file), ignore.case = TRUE))
+      R.utils::gunzip(idat_file, destname = output_file, overwrite = TRUE, remove = FALSE)
+    } else {
+      # Copy uncompressed .idat
+      file.copy(idat_file, file.path(idats_dir, basename(idat_file)), overwrite = TRUE)
+    }
+  }
+  return(idats_dir)
+}
+
+
+parse_samplesheets <- function(input_dir, preprocessing_dir) {
+  
+  # Find all CSV and XLSX files
+  ss_files <- list.files(
+    input_dir,
+    pattern = "\\.(csv|xlsx)$",
+    full.names = TRUE,
+    ignore.case = TRUE,
+    recursive = TRUE
+  )
+  
+  # Find all IDATS
+  all_idats <- list.files(
+    preprocessing_dir,
+    pattern = "\\.idat$",
+    full.names = TRUE,
+    ignore.case = TRUE,
+    recursive = TRUE
+  )
+  
+  if (length(ss_files) == 0) {
+    stop("No CSV/XLSX files found in input directory.")
+  }
+  
+  for (file in ss_files) {
+    
+    # Read file
+    df <- tryCatch({
+      if (grepl("\\.xlsx$", file, ignore.case = TRUE)) {
+        readxl::read_excel(file)
+      } else {
+        readr::read_csv(file, show_col_types = FALSE)
+      }
+    }, error = function(e) NULL)
+    
+    if (is.null(df)) next
+    
+    cols <- colnames(df)
+    cols_l <- tolower(cols)
+    
+    # ---- Determine which columns exist ----
+    has_slide   <- any(cols_l == "slide")
+    has_array   <- any(cols_l == "array")
+    has_basename <- any(cols_l == "basename")
+    has_sample_name <- any(cols_l == "sample_name")
+    
+    if (!has_slide && !has_array && !has_basename && !has_sample_name) {
+      message("Skipping file (no slide/array, basename, or sample_name): ", basename(file))
+      next
+    }
+    
+    # ---- Prepare a unified identifier (base_name) for each row ----
+    df$BaseName <- NA_character_
+    
+    # Case 1: Slide + Array columns exist
+    if (has_slide && has_array) {
+      slide_col <- cols[cols_l == "slide"][1]
+      array_col <- cols[cols_l == "array"][1]
+      for (i in seq_len(nrow(df))) {
+        slide_val <- as.character(df[[slide_col]][i])
+        array_val <- as.character(df[[array_col]][i])
+        if (!is.na(slide_val) && !is.na(array_val)) {
+          df$BaseName[i] <- paste0(slide_val, "_", array_val)
+        }
+      }
+      message("Using Slide + Array to build base name.")
+    }
+    
+    # Case 2: Basename column exists
+    if (has_basename && any(is.na(df$BaseName))) {
+      basename_col <- cols[cols_l == "basename"][1]
+      
+      # Create Slide and Array columns if they don't exist
+      if (!any(cols_l == "slide")) {
+        df$Slide <- NA_character_
+      }
+      if (!any(cols_l == "array")) {
+        df$Array <- NA_character_
+      }
+      
+      for (i in seq_len(nrow(df))) {
+        if (is.na(df$BaseName[i])) {
+          base_val <- as.character(df[[basename_col]][i])
+          # Remove path and any trailing _Grn/_Red if present
+          base_val <- basename(base_val)
+          base_val <- sub("_(Grn|Red)$", "", base_val, ignore.case = TRUE)
+          df$BaseName[i] <- base_val
+          
+          # Extract Slide and Array from Basename
+          # Expected format: Slide_Array or Sample_Slide_Array or just Basename
+          parts <- strsplit(base_val, "_")[[1]]
+          
+          if (length(parts) >= 2) {
+            # If we have at least 2 parts, assume last part is Array, second last is Slide
+            df$Array[i] <- parts[length(parts)]  # Last part is Array position
+            df$Slide[i] <- parts[length(parts) - 1]  # Second last is Slide ID
+          } else if (length(parts) == 1) {
+            # Only one part, use as is for both (fallback)
+            df$Slide[i] <- parts[1]
+            df$Array[i] <- parts[1]
+          }
+        }
+      }
+      message("Using Basename column and extracted Slide/Array.")
+    }
+    # Case 3: Only Sample_Name (fallback)
+    if (has_sample_name && any(is.na(df$BaseName))) {
+      sample_col <- cols[cols_l == "sample_name"][1]
+      for (i in seq_len(nrow(df))) {
+        if (is.na(df$BaseName[i])) {
+          df$BaseName[i] <- as.character(df[[sample_col]][i])
+        }
+      }
+      message("Using Sample_Name column (fallback).")
+    }
+    
+    # Remove rows where BaseName is still NA
+    df <- df[!is.na(df$BaseName), , drop = FALSE]
+    if (nrow(df) == 0) {
+      message("No valid base names after processing, skipping: ", basename(file))
+      next
+    }
+    
+    # ---- Add Array_Type column if missing ----
+    if (!any(cols_l == "array_type")) {
+      df$Array_Type <- NA_character_
+    }
+    
+    # ---- Add Sample_Group column if missing ----
+    if (!any(cols_l == "sample_group")) {
+      df$Sample_Group <- NA_character_
+    }
+    
+    # ---- Find matching IDAT files ----
+    keep <- logical(nrow(df))
+    for (i in seq_len(nrow(df))) {
+      base_name <- df$BaseName[i]
+      
+      # Look for any IDAT starting with base_name (case‑insensitive)
+      # Pattern: base_name followed by optional _Grn/_Red and .idat
+      pattern <- paste0("^", base_name, ".*\\.idat$")
+      idats <- all_idats[grepl(paste0("^", base_name), basename(all_idats), ignore.case = TRUE)]
+      
+      if (length(idats) > 0) {
+        keep[i] <- TRUE
+        # Extract array type from the folder containing the first IDAT
+        idat_path <- idats[1]
+        array_type_name <- basename(dirname(idat_path))
+        df$Array_Type[i] <- array_type_name
+        # Set array type as sample group if it doesn't exist
+        if(is.na(df$Sample_Group[i])){
+          df$Sample_Group[i] <- array_type_name
+        }
+      }
+    }
+    
+    df_clean <- df[keep, , drop = FALSE]
+    if (nrow(df_clean) == 0) {
+      message("No IDAT files found for any sample in: ", basename(file))
+      next
+    }
+    
+    # ---- Standardise Array_Type ----
+    df_clean$Array_Type <- sapply(df_clean$Array_Type, normalize_array_type)
+    
+    # Remove rows where Array_Type became NA (should not happen if folder names are correct)
+    df_clean <- df_clean[!is.na(df_clean$Array_Type), , drop = FALSE]
+    
+    # ---- Write per‑array sample sheets ----
+    for (array_type in unique(df_clean$Array_Type)) {
+      array_dir <- file.path(preprocessing_dir, array_type)
+      if (!dir.exists(array_dir)) {
+        dir.create(array_dir, recursive = TRUE)
+      }
+      df_array <- df_clean[df_clean$Array_Type == array_type, , drop = FALSE]
+      # Optionally drop helper columns like BaseName if you don't want them in final sheet
+      # df_array <- df_array[, !(colnames(df_array) %in% "BaseName")]
+      readr::write_csv(df_array, file.path(array_dir, "SampleSheet.csv"))
+      message("Saved SampleSheet for ", array_type, " (", nrow(df_array), " samples)")
+    }
+  }
+  
+  invisible(TRUE)
+}
+
 
 
 generate_idat_dataframe <- function(preprocessing_dir) {
@@ -251,118 +436,48 @@ separate_unselected_idats <- function(idat_df, selected_indices, preprocessing_d
       )
     }
   }
-  
   invisible(TRUE)
 }
 
 
-parse_samplesheets <- function(input_dir, preprocessing_dir) {
+generate_detection_p_barplot_subset <- function(array, rgSet, detP, threshold, total_samples, kept_samples) {
+  mean_detP <- colMeans(detP, na.rm = TRUE)
   
-  # Find candidate files
-  ss_files <- list.files(
-    input_dir,
-    pattern = "\\.(csv|xlsx)$",
-    full.names = TRUE,
-    ignore.case = TRUE,
-    recursive = TRUE
+  plot_df <- data.frame(
+    Sample = colnames(detP),
+    MeanDetP = mean_detP,
+    Group = factor(rgSet$Sample_Group)
   )
   
-  if (length(ss_files) == 0) {
-    stop("No CSV/XLSX files found in input directory.")
-  }
+  # Data is already sorted by MeanDetP descending from the subsetting step
+  # Just ensure factor levels maintain the order
+  plot_df <- plot_df[order(-plot_df$MeanDetP), ]
+  plot_df$Sample <- factor(plot_df$Sample, levels = plot_df$Sample)
   
-  for (file in ss_files) {
-    
-    # ---- Read file ----
-    df <- tryCatch({
-      if (grepl("\\.xlsx$", file, ignore.case = TRUE)) {
-        readxl::read_excel(file)
-      } else {
-        readr::read_csv(file, show_col_types = FALSE)
-      }
-    }, error = function(e) NULL)
-    
-    if (is.null(df)) next
-    
-    cols <- colnames(df)
-    
-    # ---- Check if SampleSheet? ----
-    if (!is_samplesheet(cols)) next
-    
-    cols_l <- tolower(cols)
-    
-    # Standardize column access
-    slide_col <- cols[cols_l %in% c("slide", "sentrixid", "sentrix_id")][1]
-    array_col <- cols[cols_l %in% c("array", "sentrixposition", "sentrix_position")][1]
-    array_type_col <- cols[cols_l == "array_type"]
-    
-    # ---- Step 1: determine array type ----
-    array_type <- NA_character_
-    
-    ## A) From array_type column
-    if (length(array_type_col) == 1) {
-      for (val in unique(df[[array_type_col]])) {
-        array_type <- normalize_array_type(val)
-        if (!is.na(array_type)) break
-      }
-    }
-    
-    ## B) Probe IDAT folders row-by-row
-    if (is.na(array_type)) {
-      for (i in seq_len(nrow(df))) {
-        slide <- df[[slide_col]][i]
-        array <- df[[array_col]][i]
-        
-        for (atype in get_array_types()) {
-          if (idat_exists(slide, array, atype, preprocessing_dir)) {
-            array_type <- atype
-            break
-          }
-        }
-        if (!is.na(array_type)) break
-      }
-    }
-    
-    if (is.na(array_type)) {
-      warning("Could not determine array type for SampleSheet: ", basename(file))
-      next
-    }
-    
-    # ---- Step 2: filter rows without IDATs ----
-    keep <- logical(nrow(df))
-    
-    for (i in seq_len(nrow(df))) {
-      keep[i] <- idat_exists(
-        df[[slide_col]][i],
-        df[[array_col]][i],
-        array_type,
-        preprocessing_dir
-      )
-    }
-    
-    df_clean <- df[keep, , drop = FALSE]
-    
-    if (nrow(df_clean) == 0) {
-      warning("All rows removed from SampleSheet: ", basename(file))
-      next
-    }
-    
-    # ---- Step 3: save SampleSheet ----
-    out_dir <- file.path(preprocessing_dir, array_type)
-    create_dir(out_dir)
-    
-    readr::write_csv(
-      df_clean,
-      file.path(out_dir, "SampleSheet.csv")
+  ggplot(plot_df, aes(x = Sample, y = MeanDetP, fill = Group)) +
+    geom_col() +
+    scale_fill_manual(values = col_vector) +
+    geom_hline(
+      yintercept = threshold,
+      color = "red",
+      linetype = "dashed",
+      linewidth = 0.8
+    ) +
+    labs(
+      title = paste("Mean detection p-values for", array,
+                    sprintf("(Top %d of %d samples)", kept_samples, total_samples)),
+      y = "Mean detection p-value",
+      x = NULL
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 90, hjust = 1, size = 8),
+      legend.title = element_blank()
     )
-  }
-  
-  invisible(TRUE)
 }
 
 
 generate_detection_p_barplot <- function(array, rgSet, detP, threshold) {
-  
   mean_detP <- colMeans(detP, na.rm = TRUE)
   
   plot_df <- data.frame(
@@ -393,108 +508,281 @@ generate_detection_p_barplot <- function(array, rgSet, detP, threshold) {
 }
 
 
-load_qc_data_for_arrays <- function(s, preprocessing_dir, qc_dir){
+load_qc_data_for_arrays_batch <- function(preprocessing_dir, qc_dir) {
+  batch_size = 110
   array_types <- get_array_types()
-  arrays_used <- list()
+  arrays_used <- c()
   
-  # Create qc_dirs for the arrays that are being used
+  # First pass: identify which arrays have data
   for (array in array_types) {
     array_prep_dir <- file.path(preprocessing_dir, array)
     if (!dir.exists(array_prep_dir) ||
-        length(list.files(array_prep_dir)) == 0) {
+        length(list.files(array_prep_dir, pattern = "\\.idat$", recursive = TRUE)) == 0) {
       message("Skipping empty or missing array directory: ", array)
       next
     }
     create_dir(file.path(qc_dir, array))
-    arrays_used[[length(arrays_used) + 1]] <- array
+    arrays_used <- c(arrays_used, array)
+    message("Found array: ", array)
   }
   
-  # Process arrays in series
-  qc_list <- list()
-  
-  for (array in arrays_used) {
-    array_prep_dir <- file.path(preprocessing_dir, array)
-    array_qc_dir <- file.path(qc_dir, array)
-    message(paste0("Processing ", array))
-    
-    targets <- read.metharray.sheet(array_prep_dir, pattern="SampleSheet.csv")
-    rgSet <- read.metharray.exp(base=array_prep_dir, targets=targets, verbose=TRUE, 
-                                force=TRUE, extended=TRUE)
-    # Prepare metadata
-    targets$ID <- paste(targets$Sample_Group, targets$Sample_Name, sep="_")
-    sampleNames(rgSet) <- targets$ID
-    index <- seq_along(rgSet@colData@listData)
-    rgSet@colData@listData[index] <- lapply(rgSet@colData@listData[index], as.factor)
-    
-    # Calculate detection p-values
-    detP <- detectionP(rgSet)
-    
-    # Generate QC report
-    qcReport(rgSet, sampNames = rgSet$Sample_Name, sampGroups = rgSet$Sample_Group,
-             pdf = file.path(paste0(array_qc_dir, "/2.0-QC_Report",array,".pdf")))
-    
-    message(paste0("Complete for ", array))
-    
-    qc_list[[length(qc_list) + 1]] <- list(
-      array = array,
-      rgSet = rgSet,
-      detP  = detP
-    )
+  if (length(arrays_used) == 0) {
+    stop("No arrays found to process")
   }
   
-  # Recombine results
+  # Initialize results
   qc_results <- list(
-    rgsets = setNames(
-      lapply(qc_list, `[[`, "rgSet"),
-      sapply(qc_list, `[[`, "array")
-    ),
-    detections = setNames(
-      lapply(qc_list, `[[`, "detP"),
-      sapply(qc_list, `[[`, "array")
-    )
+    rgsets = list(),
+    detections = list()
   )
   
+  # Process arrays ONE AT A TIME
+  for (array in arrays_used) {
+    message(paste0("\n=== Processing ", array, " ==="))
+    
+    array_prep_dir <- file.path(preprocessing_dir, array)
+    array_qc_dir <- file.path(qc_dir, array)
+    
+    # Load targets
+    targets <- minfi::read.metharray.sheet(array_prep_dir, pattern = "SampleSheet.csv")
+    n_samples <- nrow(targets)
+    message("Loaded targets for ", n_samples, " samples")
+    
+    if (array == "450K") {
+      library(IlluminaHumanMethylation450kmanifest)
+    } else if (array == "EPIC") {
+      library(IlluminaHumanMethylationEPICmanifest)
+    } else if (array == "EPIC_V2") {
+      library(IlluminaHumanMethylationEPICv2manifest)
+    } 
+    
+    # Determine if we need batch processing
+    if (n_samples > batch_size & array != "EPIC_V2") {
+      message("Large dataset detected (", n_samples, " samples). Using batch processing with batch size ", batch_size)
+      
+      # Calculate number of batches
+      n_batches <- ceiling(n_samples / batch_size)
+      message("Processing in ", n_batches, " batches")
+      
+      # Create directory for batch files
+      batch_dir <- create_dir(file.path(array_qc_dir, "batches"))
+      batch_paths <- c()
+      
+      # Step 1: Load and save each batch individually
+      for (batch_idx in 1:n_batches) {
+        start_idx <- (batch_idx - 1) * batch_size + 1
+        end_idx <- min(batch_idx * batch_size, n_samples)
+        
+        message("Processing batch ", batch_idx, "/", n_batches, " (samples ", start_idx, "-", end_idx, ")")
+        
+        # Load batch targets
+        batch_targets <- targets[start_idx:end_idx, ]
+        
+        # Load RGSet for this batch only
+        batch_rgSet <- minfi::read.metharray.exp(
+          base = array_prep_dir, 
+          targets = batch_targets, 
+          verbose = FALSE, 
+          force = TRUE, 
+          extended = TRUE
+        )
+        message("  Batch RGSet size: ", format(object.size(batch_rgSet), units = "auto"))
+        
+        # Prepare metadata for this batch
+        batch_targets$ID <- paste(batch_targets$Sample_Group, batch_targets$Sample_Name, sep = "_")
+        minfi::sampleNames(batch_rgSet) <- batch_targets$ID
+        
+        # Convert to factors
+        index <- seq_along(batch_rgSet@colData@listData)
+        batch_rgSet@colData@listData[index] <- lapply(batch_rgSet@colData@listData[index], as.factor)
+        
+        # Save individual batch to disk
+        batch_path <- file.path(batch_dir, paste0(array, "_batch_", batch_idx, ".rds"))
+        message("  Saving batch to: ", batch_path)
+        saveRDS(batch_rgSet, file = batch_path, compress = FALSE)
+        batch_paths <- c(batch_paths, batch_path)
+        
+        # Clean up batch from memory
+        rm(batch_rgSet, batch_targets)
+      }
+      gc()
+      message("\nAll batches saved. Now merging ", length(batch_paths), " batches...")
+      
+      # Step 2: Merge all batches from disk
+      # Load first batch as base
+      message("Loading first batch as base...")
+      rgSet <- readRDS(batch_paths[1])
+      message("  Base RGSet size: ", format(object.size(rgSet), units = "auto"))
+      
+      # Load and merge remaining batches one by one
+      if (length(batch_paths) > 1) {
+        for (i in 2:length(batch_paths)) {
+          message("Merging batch ", i, "/", length(batch_paths), "...")
+          
+          # Load batch from disk
+          batch_rgSet <- readRDS(batch_paths[i])
+          message("  Batch size: ", format(object.size(batch_rgSet), units = "auto"))
+          
+          # Combine with main RGSet
+          rgSet <- minfi::combineArrays(rgSet, batch_rgSet, 
+                                        outType = ifelse(array == "EPIC", 
+                                                         "IlluminaHumanMethylationEPIC",
+                                                         "IlluminaHumanMethylation450k"))
+          
+          # Clean up batch and force garbage collection
+          rm(batch_rgSet)
+          message("  Combined RGSet size: ", format(object.size(rgSet), units = "auto"))
+        }
+      }
+      gc()
+      message("Final RGSet size: ", format(object.size(rgSet), units = "auto"))
+      
+      # Step 3: Calculate detection p-values on the merged RGSet
+      message("Calculating detection p-values on merged dataset...")
+      detP <- minfi::detectionP(rgSet)
+      message("detP size: ", format(object.size(detP), units = "auto"))
+      
+      # Step 4: Generate QC report
+      message("Generating QC report...")
+      minfi::qcReport(rgSet, 
+                      sampNames = rgSet$Sample_Name, 
+                      sampGroups = rgSet$Sample_Group,
+                      pdf = file.path(array_qc_dir, paste0("2.0-QC_Report_", array, ".pdf")))
+      
+      # Step 5: Save final merged objects
+      rgset_path <- file.path(array_qc_dir, paste0(array, "_rgSet.rds"))
+      detp_path <- file.path(array_qc_dir, paste0(array, "_detP.rds"))
+      
+      message("Saving final RGSet to disk: ", rgset_path)
+      saveRDS(rgSet, file = rgset_path, compress = FALSE)
+      
+      message("Saving final detP to disk: ", detp_path)
+      saveRDS(detP, file = detp_path, compress = TRUE)
+      
+      # Step 6: Optionally delete batch files to save space
+      message("Cleaning up batch files...")
+      unlink(batch_dir, recursive = TRUE)
+      
+      qc_results$rgsets[[array]] <- rgset_path
+      qc_results$detections[[array]] <- detp_path
+      
+      # Clean up
+      rm(rgSet, detP)
+      
+    } else {
+      # Original processing for small datasets (<= batch_size samples or EPIC_V2)
+      message("Small dataset (", n_samples, " samples). Loading all at once...")
+      
+      rgSet <- minfi::read.metharray.exp(
+        base = array_prep_dir, 
+        targets = targets, 
+        verbose = TRUE, 
+        force = TRUE, 
+        extended = TRUE
+      )
+      
+      message("RGSet size: ", format(object.size(rgSet), units = "auto"))
+      
+      # Prepare metadata
+      targets$ID <- paste(targets$Sample_Group, targets$Sample_Name, sep = "_")
+      minfi::sampleNames(rgSet) <- targets$ID
+      
+      # Convert to factors
+      index <- seq_along(rgSet@colData@listData)
+      rgSet@colData@listData[index] <- lapply(rgSet@colData@listData[index], as.factor)
+      
+      # Calculate detection p-values
+      message("Calculating detection p-values...")
+      detP <- minfi::detectionP(rgSet)
+      message("detP size: ", format(object.size(detP), units = "auto"))
+      
+      # Generate QC report
+      message("Generating QC report...")
+      minfi::qcReport(rgSet, 
+                      sampNames = rgSet$Sample_Name, 
+                      sampGroups = rgSet$Sample_Group,
+                      pdf = file.path(array_qc_dir, paste0("2.0-QC_Report_", array, ".pdf")))
+      
+      # Save to disk
+      rgset_path <- file.path(array_qc_dir, paste0(array, "_rgSet.rds"))
+      detp_path <- file.path(array_qc_dir, paste0(array, "_detP.rds"))
+      
+      message("Saving RGSet to disk: ", rgset_path)
+      saveRDS(rgSet, file = rgset_path, compress = FALSE)
+      
+      message("Saving detP to disk: ", detp_path)
+      saveRDS(detP, file = detp_path, compress = TRUE)
+      
+      qc_results$rgsets[[array]] <- rgset_path
+      qc_results$detections[[array]] <- detp_path
+      
+      # Clean up
+      rm(rgSet, detP)
+    }
+    
+    message("Completed ", array, "\n")
+  }
+  gc()
   return(list(
     qc_results = qc_results,
     arrays_used = arrays_used
   ))
 }
 
+
 normalizeMeth <- function(rgSet, norm_method) {
+  batch_size <- 50
   method <- tolower(norm_method)
   message("Normalizing using method: ", method)
   
+  if (method == "ssnoob" && ncol(rgSet) > 50) {
+    message("More than 50 samples detected. Running ssNoob normalization in batches of ", batch_size, "...")
+    
+    n_samples <- ncol(rgSet)
+    batch_indices <- split(seq_len(n_samples), ceiling(seq_len(n_samples) / batch_size))
+    
+    mset_list <- lapply(seq_along(batch_indices), function(i) {
+      idx <- batch_indices[[i]]
+      message("  Processing batch ", i, "/", length(batch_indices),
+              " (samples ", idx[1], "-", idx[length(idx)], ")")
+      minfi::preprocessNoob(rgSet[, idx])
+    })
+    
+    message("Combining ", length(mset_list), " batches using combineArrays...")
+    combined <- do.call(minfi::combineArrays, mset_list)
+    return(combined)
+  }
+  
   switch(method,
-         ssnoob    = preprocessNoob(rgSet),
-         raw       = preprocessRaw(rgSet),
-         illumina  = preprocessIllumina(rgSet),
-         quantile  = preprocessQuantile(rgSet),
-         funnorm   = preprocessFunnorm(rgSet),
+         ssnoob    = minfi::preprocessNoob(rgSet),
+         raw       = minfi::preprocessRaw(rgSet),
+         illumina  = minfi::preprocessIllumina(rgSet),
+         quantile  = minfi::preprocessQuantile(rgSet),
+         funnorm   = minfi::preprocessFunnorm(rgSet),
          stop("Unknown normalization method: ", method,
               "\nValid options are: ssnoob, raw, illumina, quantile, funnorm"))
 }
 
 
-calculateBeta <- function(rgSet, mSetSq) {
-  methy_unorm <- getMeth(preprocessRaw(rgSet))
-  unmethy_unorm <- getUnmeth(preprocessRaw(rgSet))
-  beta_unorm <- methy_unorm / (methy_unorm + unmethy_unorm + 100)
-  
-  methy <- getMeth(mSetSq)
-  unmethy <- getUnmeth(mSetSq)
-  beta <- methy / (methy + unmethy + 100)
-  
-  list(
-    beta = beta,
-    beta_unorm = beta_unorm,
-    methy = methy,
-    unmethy = unmethy
-  )
-}
+# calculateBeta <- function(rgSet, mSetSq) {
+#   methy_unorm <- minfi::getMeth(preprocessRaw(rgSet))
+#   unmethy_unorm <- minfi::getUnmeth(preprocessRaw(rgSet))
+#   beta_unorm <- methy_unorm / (methy_unorm + unmethy_unorm + 100)
+#   
+#   methy <- minfi::getMeth(mSetSq)
+#   unmethy <- minfi::getUnmeth(mSetSq)
+#   beta <- methy / (methy + unmethy + 100)
+#   
+#   list(
+#     beta = beta,
+#     beta_unorm = beta_unorm,
+#     methy = methy,
+#     unmethy = unmethy
+#   )
+# }
 
-filterDetectionP <- function(rgSet, mSetSq, threshold) {
-  detP <- detectionP(rgSet)
-  detP <- detP[match(featureNames(mSetSq), rownames(detP)), ]
+filterDetectionP <- function(rgSet, detP, mSetSq, threshold) {
+  detP <- detP[match(minfi::featureNames(mSetSq), rownames(detP)), ]
   keep <- rowSums(detP < threshold) == ncol(rgSet)
   
   message("Detection p-value filter: ", threshold)
@@ -538,8 +826,8 @@ adjustFFPE <- function(methy, unmethy, tissue_type) {
   
   message("Adjusting by FFPE/Frozen tissue type...")
   batch <- ifelse(tissue_type == "FFPE", 2, 1)
-  methy.ba <- 2^removeBatchEffect(log2(methy + 1), batch)
-  unmethy.ba <- 2^removeBatchEffect(log2(unmethy + 1), batch)
+  methy.ba <- 2^limma:removeBatchEffect(log2(methy + 1), batch)
+  unmethy.ba <- 2^limma:removeBatchEffect(log2(unmethy + 1), batch)
   
   methy.ba / (methy.ba + unmethy.ba + 100)
 }
@@ -547,87 +835,322 @@ adjustFFPE <- function(methy, unmethy, tissue_type) {
 
 finalizeBeta <- function(beta) {
   beta <- aggregate_to_probes(beta)
-  rmSNPandCH(beta, dist = 2, mafcut = 0.05, rmXY = TRUE, rmcrosshyb = TRUE)
+  beta <- DMRcate::rmSNPandCH(beta, dist = 2, mafcut = 0.05, rmXY = TRUE, rmcrosshyb = TRUE)
+  beta
 }
 
 
 plotPostQC <- function(mSet, array_name, resultsDir) {
-  pdf(file.path(resultsDir, paste0("3- Post-filtered data QC for array_", array_name, ".pdf")),
-      width = 12, height = 7)
-  qc <- getQC(mSet)
-  plotQC(qc)
-  dev.off()
+  grDevices::pdf(file.path(resultsDir, paste0("3- Post-filtered data QC for array_", array_name, ".pdf")),
+                 width = 12, height = 7)
+  qc <- minfi::getQC(mSet)
+  minfi::plotQC(qc)
+  grDevices::dev.off()
 }
 
-
-generate_beta_matrix <- function(cores, array, rgSet, detP, norm_method, threshold, 
-                                 filter_dir, beta_dir) {
-  message("Processing array: ", array)
-  array_beta_dir <- create_dir(file.path(beta_dir, array))
+generate_beta_boxplot_static <- function(array, beta, out_dir) {
+  # Calculate boxplot statistics
+  message("  Calculating boxplot statistics...")
   
-  ## --- 0. Exclude poor quality samples ---
-  keep <- colMeans(detP) < threshold
-  rgSet <- rgSet[, keep]
+  # Convert beta matrix to long format for ggplot
+  beta_df <- as.data.frame(beta)
+  beta_long <- tidyr::pivot_longer(
+    beta_df,
+    cols = dplyr::everything(),
+    names_to = "sample",
+    values_to = "beta_value"
+  )
   
-  ## ---- 1. Normalization ----
-  mSetSq <- normalizeMeth(rgSet, norm_method)
+  # Calculate summary statistics for each sample
+  stats_df <- beta_long %>%
+    dplyr::group_by(sample) %>%
+    dplyr::summarise(
+      q1 = quantile(beta_value, 0.25, na.rm = TRUE),
+      median = quantile(beta_value, 0.5, na.rm = TRUE),
+      q3 = quantile(beta_value, 0.75, na.rm = TRUE),
+      iqr = q3 - q1,
+      lower_whisker = max(q1 - 1.5 * iqr, min(beta_value, na.rm = TRUE)),
+      upper_whisker = min(q3 + 1.5 * iqr, max(beta_value, na.rm = TRUE)),
+      .groups = "drop"
+    )
   
-  ## ---- 2. Raw & normalized beta/M values ----
-  beta_list <- calculateBeta(rgSet, mSetSq)
-  beta_unf <- beta_list$beta
-  
-  ## ---- 3. Detection p-value filtering ----
-  mSetSq <- filterDetectionP(rgSet, mSetSq, threshold)
-  
-  ## ---- 4. Probe filtering ----
-  mSetSq_flt <- filterProbes(mSetSq, filter_dir)
-  
-  ## ---- 5. FFPE / Frozen adjustment ----
-  beta <- adjustFFPE(getMeth(mSetSq_flt), getUnmeth(mSetSq_flt), mSetSq_flt$Tissue_Type)
-  
-  ## ---- 6. Array-specific handling ----
-  if (array == "EPIC_V2") {
-    message("EPIC_V2 detected → aggregating to probes")
-    beta <- aggregate_to_probes(beta)
-    mVals_unf <- getM(mSetSq)    
-    mVals_unf <- aggregate_to_probes(mVals_unf)
-    unfiltered_data <- mSetSq    
-    filtered_dat <- mSetSq_flt
-  } else {
-    mVals_unf <- getM(mSetSq)
+  # Create color palette based on sample groups if available
+  n_samples <- nrow(stats_df)
+  color_palette <- RColorBrewer::brewer.pal(min(n_samples, 12), "Set3")
+  if (n_samples > 12) {
+    color_palette <- rep(color_palette, length.out = n_samples)
   }
   
+  # Create the plot
+  p <- ggplot2::ggplot(stats_df, aes(x = reorder(sample, median), fill = sample)) +
+    ggplot2::geom_boxplot(
+      ggplot2::aes(
+        lower = q1,
+        middle = median,
+        upper = q3,
+        ymin = lower_whisker,
+        ymax = upper_whisker
+      ),
+      stat = "identity",
+      alpha = 0.7,
+      show.legend = FALSE
+    ) +
+    ggplot2::scale_fill_manual(values = color_palette) +
+    ggplot2::labs(
+      title = paste("Beta Value Distribution -", array),
+      x = "Sample",
+      y = "Beta Value"
+    ) +
+    ggplot2::theme_classic() +
+    ggplot2::theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      axis.title = element_text(size = 12),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      panel.grid.major.y = element_line(color = "gray90", linewidth = 0.3),
+      panel.grid.minor.y = element_blank()
+    )
+  
+  # Save as PNG
+  png_path <- file.path(out_dir, paste0("beta_boxplot_", array, ".png"))
+  ggplot2::ggsave(png_path, p, width = max(10, n_samples * 0.3), height = 6, dpi = 150)
+  message("  Saved boxplot to: ", png_path)
+  
+  # Also save as PDF for better quality
+  pdf_path <- file.path(out_dir, paste0("beta_boxplot_", array, ".pdf"))
+  ggplot2::ggsave(pdf_path, p, width = max(10, n_samples * 0.3), height = 6)
+}
+
+# TODO: implement DelayedArray and HDF5Array to reduce impact on memory and process bigger datasets
+# generate_beta_matrix <- function(array, rgSet, detP, norm_method, threshold,
+#                                  filter_dir, beta_dir) {
+#   library(IlluminaHumanMethylationEPICv2anno.20a1.hg38)
+#   library(HDF5Array)
+#   library(DelayedArray)
+#   library(DelayedMatrixStats)  # drop-in matrixStats for DelayedArrays
+#   
+#   message("Processing array: ", array)
+#   array_beta_dir <- create_dir(file.path(beta_dir, array))
+#   
+#   # HDF5 scratch directory for intermediate on-disk arrays
+#   hdf5_scratch <- create_dir(file.path(array_beta_dir, "hdf5_scratch"))
+#   
+#   # Configure DelayedArray to process data in chunks (tune to your RAM)
+#   # 1e9 = ~1 GB blocks; increase if you have more RAM available
+#   setAutoBlockSize(8e9)
+#   
+#   ## --- 0. Exclude poor quality samples ---
+#   keep   <- DelayedMatrixStats::colMeans2(detP) < threshold
+#   detP   <- detP[, keep]
+#   rgSet  <- rgSet[, keep]
+#   rm(keep)
+#   
+#   ## ---- 1. Normalization ----
+#   # NOTE: minfi's normalization (especially Noob/SWAN/Funnorm) is not yet 
+#   # DelayedArray-native — it materializes internally. This step still peaks RAM.
+#   # The gain comes from everything AFTER this point.
+#   mSetSq <- normalizeMeth(rgSet, norm_method)
+#   rm(rgSet)  # free raw data immediately after normalization
+#   gc()
+#   
+#   ## ---- 2. Detection p-value filtering ----
+#   mSetSq <- filterDetectionP(rgSet = NULL, detP, mSetSq, threshold)
+#   rm(detP)
+#   gc()
+#   
+#   ## ---- 3. Probe filtering ----
+#   mSetSq_flt <- filterProbes(mSetSq, filter_dir)
+#   
+#   ## ---- 4. Extract meth/unmeth as HDF5-backed DelayedArrays ----
+#   # Instead of pulling both into RAM simultaneously, write each to HDF5 first
+#   meth_path   <- file.path(hdf5_scratch, "meth.h5")
+#   unmeth_path <- file.path(hdf5_scratch, "unmeth.h5")
+#   
+#   message("Writing meth/unmeth to HDF5 scratch...")
+#   
+#   meth_h5 <- writeHDF5Array(
+#     minfi::getMeth(mSetSq_flt),
+#     filepath = meth_path,
+#     name     = "meth",
+#     chunkdim = c(min(10000, nrow(mSetSq_flt)), ncol(mSetSq_flt)),  # probe chunks
+#     verbose  = FALSE
+#   )
+#   
+#   unmeth_h5 <- writeHDF5Array(
+#     minfi::getUnmeth(mSetSq_flt),
+#     filepath = unmeth_path,
+#     name     = "unmeth",
+#     chunkdim = c(min(10000, nrow(mSetSq_flt)), ncol(mSetSq_flt)),
+#     verbose  = FALSE
+#   )
+#   rm(mSetSq_flt)
+#   gc()
+#   
+#   ## ---- 5. FFPE / Frozen adjustment (operates on DelayedArrays) ----
+#   # adjustFFPE needs to be compatible with DelayedArray inputs.
+#   # If it uses standard matrix ops it will work; if it calls C internals 
+#   # directly it may need realize() first — see note below.
+#   beta_delayed <- adjustFFPE(meth_h5, unmeth_h5, mSetSq$Tissue_Type)
+#   rm(meth_h5, unmeth_h5)
+#   
+#   ## ---- 6. Save adjusted beta as HDF5Array (on-disk) ----
+#   beta_h5_path <- file.path(hdf5_scratch, "beta_adjusted.h5")
+#   
+#   message("Materializing adjusted beta to HDF5...")
+#   beta_h5 <- writeHDF5Array(
+#     beta_delayed,
+#     filepath = beta_h5_path,
+#     name     = "beta",
+#     chunkdim = c(min(10000, nrow(beta_delayed)), ncol(beta_delayed)),
+#     verbose  = TRUE   # shows block progress
+#   )
+#   rm(beta_delayed)
+#   gc()
+#   
+#   ## ---- 7. Final SNP / XY / cross-hyb filtering ----
+#   # finalizeBeta likely does row subsetting — works transparently on DelayedArray
+#   beta_h5 <- finalizeBeta(beta_h5)
+#   
+#   ## ---- 8. Boxplots ----
+#   # generate_beta_boxplot_static must handle DelayedArray OR realize a sample:
+#   #   beta_sample <- realize(beta_h5[, sample(ncol(beta_h5), min(20, ncol(beta_h5)))])
+#   generate_beta_boxplot_static(array, beta_h5, out_dir = array_beta_dir)
+#   
+#   ## ---- 9. Save final outputs ----
+#   # Option A: save as HDF5Array (recommended — stays on disk)
+#   beta_final_path <- file.path(array_beta_dir, paste0("001_beta_", array))
+#   
+#   message("Saving final beta HDF5Array to: ", beta_final_path)
+#   saveHDF5SummarizedExperiment(
+#     # wrap in SummarizedExperiment if you want metadata attached, or:
+#     beta_h5,                           
+#     dir     = beta_final_path,
+#     replace = TRUE
+#   )
+#   
+#   # Option B: if downstream code expects a plain RDS matrix, realize to disk:
+#   # beta_matrix <- as.matrix(beta_h5)   # ← only do this if you have the RAM
+#   # saveRDS(beta_matrix, file = beta_path, compress = FALSE)
+#   
+#   mset_path <- file.path(array_beta_dir, paste0("002_unfilteredData_", array, ".rds"))
+#   message("Saving mSetSq to: ", mset_path)
+#   saveRDS(mSetSq, file = mset_path, compress = FALSE)
+#   rm(mSetSq, beta_h5)
+#   
+#   # Clean up scratch HDF5 intermediates (keep only final output)
+#   unlink(hdf5_scratch, recursive = TRUE)
+#   gc()
+#   
+#   message("Finished array: ", array)
+#   
+#   return(list(
+#     beta_path = beta_final_path,   # directory containing HDF5Array
+#     mset_path = mset_path,
+#     array     = array
+#   ))
+# }
+
+generate_beta_matrix <- function(array, rgSet, detP, norm_method, threshold,
+                                 filter_dir, beta_dir) {
+  # Required for aggregate_to_probes()
+  library(IlluminaHumanMethylationEPICv2anno.20a1.hg38)
+
+  message("Processing array: ", array)
+  array_beta_dir <- create_dir(file.path(beta_dir, array))
+
+  ## --- 0. Exclude poor quality samples ---
+  keep <- colMeans(detP) < threshold
+  detP  <- detP[, keep]
+  rgSet <- rgSet[, keep]
+  rm(keep)
+
+  ## ---- 1. Normalization ----
+  mSetSq <- normalizeMeth(rgSet, norm_method)
+
+  ## ---- 2. Raw & normalized beta/M values ----
+  # maybe use DelayedArray?
+  # beta_unf_path <- file.path(array_beta_dir, paste0("000_beta_unfiltered_", array, ".rds"))
+  # beta_unf <- calculateBeta(rgSet, mSetSq)$beta
+  # saveRDS(beta_unf, file = beta_unf_path, compress = FALSE)
+  # rm(beta_unf)
+
+  ## ---- 3. Detection p-value filtering ----
+  mSetSq <- filterDetectionP(rgSet, detP, mSetSq, threshold)
+  rm(rgSet, detP)
+
+  ## ---- 4. Probe filtering ----
+  mSetSq_flt <- filterProbes(mSetSq, filter_dir)
+
+  ## ---- 5. FFPE / Frozen adjustment ----
+  meth   <- minfi::getMeth(mSetSq_flt)
+  unmeth <- minfi::getUnmeth(mSetSq_flt)
+  beta   <- adjustFFPE(meth, unmeth, mSetSq_flt$Tissue_Type)
+  rm(meth, unmeth, mSetSq_flt)
+
+  ## ---- 6. Array-specific handling ----
+  # if (array == "EPIC_V2") {
+  #   message("EPIC_V2 detected → aggregating to probes")
+  #   beta <- aggregate_to_probes(beta)
+    # mVals_unf <- minfi::getM(mSetSq)
+    # mVals_unf <- aggregate_to_probes(mVals_unf)
+    # unfiltered_data <- mSetSq
+    # filtered_dat <- mSetSq_flt
+  # }
+  # else {
+  #   mVals_unf <- minfi::getM(mSetSq)
+  # }
+  # rm(mVals_unf)
+
   ## ---- 7. Final SNP / XY / cross-hyb filtering ----
-  beta <- finalizeBeta(beta) 
+  beta <- finalizeBeta(beta)
+
+  ## ---- 8. Beta QCplots ----
+  # plotPostQC(mSetSq_flt, array, array_beta_dir)
+
+  ## ---- 9. Beta Boxplots ---
+  generate_beta_boxplot_static(array, beta, out_dir = array_beta_dir)
+
+  ## ---- 10. Save outputs ----
+  beta_path <- file.path(array_beta_dir, paste0("001_beta_", array, ".rds"))
+  mset_path <- file.path(array_beta_dir, paste0("002_unfilteredData_", array, ".rds"))
+  # mset_flt_path <- file.path(array_beta_dir, paste0("003_filteredData_", array, ".rds"))
+
+  message("Saving beta to: ", beta_path)
+  saveRDS(beta, file = beta_path, compress = FALSE)
+  rm(beta)
+
+  message("Saving mSetSq to: ", mset_path)
+  saveRDS(mSetSq, file = mset_path, compress = FALSE)
+  rm(mSetSq)
   
-  ## ---- 8. QC plots ----
-  plotPostQC(mSetSq_flt, array, array_beta_dir)
-  
-  ## ---- 9. Save outputs ----
-  saveRDS(beta, file.path(array_beta_dir, paste0("001_beta_", array, ".rds")))
-  write.csv(beta, file.path(array_beta_dir, paste0("001_beta_", array, ".csv")))
-  saveRDS(mSetSq,      file.path(array_beta_dir, paste0("002_unfilteredData_", array, ".rds")))
-  saveRDS(mSetSq_flt,  file.path(array_beta_dir, paste0("003_filteredData_", array, ".rds")))
-  
+  # message("Saving mSetSq_flt to: ", mset_flt_path)
+  # saveRDS(mSetSq_flt, file = mset_flt_path, compress = FALSE)
+
   message("Finished array: ", array)
-  
+
+  # Cleanup
+  gc()
+
   return(list(
-    beta = beta,
-    mVals_unf = mVals_unf
+    beta_path = beta_path,
+    mset_path = mset_path,
+    array = array
   ))
 }
 
 
-merge_samplesheets <- function(arrays, preprocessing_dir, beta_merge_dir){
-  all_targets <- lapply(arrays, function(array) {
-    array_path <- file.path(preprocessing_dir, array)
-    targets <- read.metharray.sheet(array_path, pattern = "SampleSheet.csv")
-    targets$ID <- paste(targets$Sample_Group, targets$Sample_Name, sep = "_")
-    targets
-  })
+merge_samplesheets <- function(arrays, preprocessing_dir, beta_merge_dir) {
+  all_targets <- list()
   
-  # Name the list with array names
-  names(all_targets) <- arrays
+  for (array in arrays) {
+    array_path <- file.path(preprocessing_dir, array)
+    targets <- minfi::read.metharray.sheet(array_path, pattern = "SampleSheet.csv")
+    targets$ID <- paste(targets$Sample_Group, targets$Sample_Name, sep = "_")
+    all_targets[[array]] <- targets
+    
+    # Save individual targets to disk
+    target_path <- file.path(beta_merge_dir, paste0("targets_", array, ".rds"))
+    saveRDS(targets, target_path)
+  }
   
   # Get all unique columns
   all_cols <- unique(unlist(lapply(all_targets, colnames)))
@@ -642,16 +1165,21 @@ merge_samplesheets <- function(arrays, preprocessing_dir, beta_merge_dir){
     df[, all_cols]
   })
   
+  # Merge
   targets_merged <- do.call(rbind, all_targets_aligned)
-  write.csv(targets_merged, file = file.path(beta_merge_dir, paste0("targets_merged.csv")))
+  
+  # Save merged
+  merged_path <- file.path(beta_merge_dir, "targets_merged.rds")
+  saveRDS(targets_merged, merged_path)
+  write.csv(targets_merged, file.path(beta_merge_dir, "targets_merged.csv"))
+  
   cat("\nMerged SampleSheet completed at", Sys.time(), "\n")
   
-  # Return both individual targets and merged targets
   return(list(
-    targets_individual = all_targets,
     targets_merged = targets_merged
   ))
 }
+
 
 merge_matrix <- function(x, y) {
   m <- merge(x, y, by = "row.names")
@@ -659,14 +1187,42 @@ merge_matrix <- function(x, y) {
 }
 
 
-merge_beta_matrix <- function(processed_results, beta_merge_dir){
-  beta_merged <- Reduce(merge_matrix,lapply(processed_results, `[[`, "beta"))
-  write.csv(beta_merged, file = file.path(beta_merge_dir, paste0("beta_merged.csv")))
+merge_beta_matrix_from_disk <- function(beta_paths, beta_merge_dir) {
+  message("Merging beta matrices from disk...")
   
-  mVals_unf  <- Reduce(merge_matrix, lapply(processed_results, `[[`, "mVals_unf"))
-  mVals <- mVals_unf[rownames(beta_merged), ]
-  write.csv(mVals, file = file.path(beta_merge_dir, paste0("mVals_merged.csv")))
+  # Load first beta matrix
+  message("Loading first beta matrix: ", basename(beta_paths[1]))
+  beta_merged <- readRDS(beta_paths[1])
+  message("  Size: ", format(object.size(beta_merged), units = "auto"))
+  
+  # Load and merge remaining matrices one by one
+  if (length(beta_paths) > 1) {
+    for (i in 2:length(beta_paths)) {
+      message("Loading beta matrix ", i, "/", length(beta_paths), ": ", basename(beta_paths[i]))
+      beta_next <- readRDS(beta_paths[i])
+      message("  Size: ", format(object.size(beta_next), units = "auto"))
+      
+      # Merge current with next
+      message("  Merging...")
+      beta_merged <- merge(beta_merged, beta_next, by = "row.names")
+      
+      # Clean up
+      rownames(beta_merged) <- beta_merged[, 1]
+      beta_merged[, 1] <- NULL
+      
+      rm(beta_next)
+      
+      message("  Merged size: ", format(object.size(beta_merged), units = "auto"))
+    }
+  }
+  
+  # Save merged result
+  message("Saving merged beta matrix...")
+  saveRDS(beta_merged, file = file.path(beta_merge_dir, "beta_merged.rds"))
+  write.csv(beta_merged, file = file.path(beta_merge_dir, "beta_merged.csv"))
+  
   cat("\nMerged BetaMatrix completed at", Sys.time(), "\n")
+  cat("Final size: ", format(object.size(beta_merged), units = "auto"), "\n")
   
   return(beta_merged)
 }
@@ -680,6 +1236,12 @@ extract_beta_and_targets <- function(input_dir, beta_dir){
   
   if (length(all_files) == 0) {
     stop("No CSV files found in the input folder")
+  }
+  
+  # create merged directory inside beta_dir
+  merged_dir <- file.path(beta_dir, "merged")
+  if (!dir.exists(merged_dir)) {
+    dir.create(merged_dir, recursive = TRUE)
   }
   
   beta_matrix_file <- NULL
@@ -741,49 +1303,28 @@ extract_beta_and_targets <- function(input_dir, beta_dir){
   
   # Copy files to output directory
   file.copy(from = beta_matrix_file, 
-            to = file.path(beta_dir, "beta.csv"), overwrite = TRUE)
+            to = file.path(merged_dir, "beta_merged.csv"), overwrite = TRUE)
   
   file.copy(from = targets_file, 
-            to = file.path(beta_dir, "targets.csv"), overwrite = TRUE)
+            to = file.path(merged_dir, "targets_merged.csv"), overwrite = TRUE)
   
   message("Successfully copied files:")
   message("  Beta matrix: ", basename(beta_matrix_file))
   message("  Targets file: ", basename(targets_file))
   
+  beta <- read.csv(file.path(merged_dir, "beta_merged.csv"))
+  # Set cpgs id as rownames
+  first_col_values <- as.character(beta[, 1])
+  rownames(beta) <- first_col_values
+  beta <- beta[, -1, drop = FALSE]  # Remove the first column
   
-  beta <- read.csv(file.path(beta_dir, "beta.csv"))
-  targets <- read.csv(file.path(beta_dir, "targets.csv"))
+  # Convert to matrix
+  beta <- as.matrix(beta)
+  
+  targets <- read.csv(file.path(merged_dir, "targets_merged.csv"))
   
   invisible(list(
     beta = beta,
     targets = targets
   ))
-}
-
-# TODO: PREGUNTAR A CARLA
-# Esto está comentado en loadMethylationData
-plotBetaValues <- function(beta_list) {
-  pdf(paste0(resultsDir,"/2.1-Raw vs. Normalized boxplots.pdf"), width = 17, height = 11) 
-  par(mfrow=c(3,2))
-  lapply(seq_along(beta_list), function(i) {
-    beta_data <- beta_list[[i]]
-    boxplot(as.data.frame(beta_data$beta_unorm), main = paste("Original", names(beta_list)[i]))
-    boxplot(as.data.frame(beta_data$beta_unf), main = paste("Normalized", names(beta_list)[i]))
-  })
-  dev.off()
-}
-
-
-#TODO: Preguntar a Carla
-generate_beta_qc <- function(beta_path, targets_path, beta_dir){
-  # Generate QC plots
-  beta <- read.csv(beta_path)
-  targets <- read.csv(targets_path)
-  out_file <- file.path(beta_dir, paste0('M4A_QC_', format(Sys.Date(), '%Y%m%d'), '.pdf'))
-  rgset <- NULL
-  rgset <- minfi::read.metharray.exp(base = dirname(beta_path))
-  
-  # TODO: Esto no soy capaz de hacerlo funcionar
-  # methylation_QCplots(rgset, file = out_file, sampGroups = targets$Sample_Group, palette = col_vector)
-  message("Succesfully generated QC plots for beta matrix")
 }

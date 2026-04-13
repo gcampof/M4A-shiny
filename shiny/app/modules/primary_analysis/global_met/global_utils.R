@@ -7,12 +7,16 @@ plot_global_methylation <- function(
     group1          = NULL,      
     group2          = NULL,   
     annot,
-    color_palette
+    color_palette,
+    out_dir
 ) {
   # Prepare inputs
   align_res <- align_targets_to_beta_cols(beta, targets, id_col)
   beta2    <- align_res$beta2
   targets2 <- align_res$targets2
+  
+  message("[DEBUG] First 5 beta rownames: ", paste(head(rownames(beta2)), collapse=", "))
+  message("[DEBUG] First 5 annot rownames: ", paste(head(rownames(annot)), collapse=", "))
   
   # Extract and clean groups
   groups <- trimws(as.character(targets2[[comparison_col]]))
@@ -66,6 +70,10 @@ plot_global_methylation <- function(
   beta_shore  <- beta2[rownames(beta2) %in% rownames(annot[annot$Relation_to_Island %in% c("N_Shore", "S_Shore"), ]),]
   beta_shelves <- beta2[rownames(beta2) %in% rownames(annot[annot$Relation_to_Island %in% c("S_Shelf", "N_Shelf", "OpenSea"), ]),]
   
+  message("[DEBUG] beta_cgi rows: ", nrow(beta_cgi))
+  message("[DEBUG] beta_shore rows: ", nrow(beta_shore))
+  message("[DEBUG] beta_shelves rows: ", nrow(beta_shelves))
+  
   get_means <- function(mat, label) {
     data.frame(
       SampleMean = colMeans(mat, na.rm = TRUE),
@@ -87,43 +95,73 @@ plot_global_methylation <- function(
   plot_data$Group   <- factor(plot_data$Group)
   
   # Color mapping
-  group_levels <- levels(plot_data$Group)
-  n_needed     <- length(group_levels)
-  base_colors  <- color_palette(n_needed)
-  if (length(base_colors) < n_needed) base_colors <- rep_len(base_colors, n_needed)
-  fill_colors  <- setNames(base_colors, group_levels)
+  color_vals <- levels(plot_data$Group)
+  matched_colors <- get_matching_colors(color_vals, color_palette)
   
-  # Plot
-  p <- ggplot2::ggplot(plot_data, ggplot2::aes(Group, SampleMean, fill = Group)) +
-    ggplot2::geom_boxplot(outlier.shape = NA, linewidth = 0.5) +
-    ggplot2::geom_jitter(width = 0.2, size = 1.2, alpha = 0.7) +
+  # Create title based on comparison type
+  if (comparison_type == "custom") {
+    plot_title <- comparison_label
+  } else {
+    plot_title <- paste0("Global Mean Methylation by ", comparison_label)
+  }
+  
+  # Plot with clean theme_classic styling
+  p <- ggplot2::ggplot(plot_data, ggplot2::aes(x = Group, y = SampleMean, fill = Group)) +
+    ggplot2::geom_boxplot(outlier.shape = NA, alpha = 0.8, linewidth = 0.5) +
+    ggplot2::geom_jitter(width = 0.2, size = 1.5, alpha = 0.6) +
     ggpubr::stat_compare_means(
       comparisons = comparisons_list,
       method      = "wilcox.test",
       label       = "p.signif",
-      size        = 2.5
+      size        = 5,  # Increased from 3 to 5 for larger significance stars
+      vjust       = 0.5
     ) +
     ggplot2::facet_wrap(~CpGType, nrow = 1) +
-    ggplot2::scale_fill_manual(values = fill_colors) +
+    ggplot2::scale_fill_manual(values = matched_colors) +
     ggplot2::coord_cartesian(ylim = c(0.18, 0.80)) +
     ggplot2::labs(
-      title = paste("Global Mean Methylation —", comparison_label),
-      x     = NULL,
-      y     = "Mean beta per sample"
+      title = plot_title,
+      x = NULL,
+      y = "Mean Beta Value",
+      fill = comparison_col
     ) +
-    ggplot2::theme_gray(base_size = 12) +
+    ggplot2::theme_classic() +
     ggplot2::theme(
-      plot.title   = ggplot2::element_text(size = 13, face = "bold"),
-      axis.title.y = ggplot2::element_text(size = 11),
-      axis.text.y  = ggplot2::element_text(size = 10),
-      legend.text      = ggplot2::element_text(size = 12),
-      legend.title     = ggplot2::element_text(size = 13, face = "bold"),
-      legend.key.size  = ggplot2::unit(1.2, "cm"),    
-      axis.text.x  = ggplot2::element_blank(),
+      # Title styling - larger and bold
+      plot.title = ggplot2::element_text(size = 14, face = "bold", margin = ggplot2::margin(b = 10)),
+      
+      # Text styling
+      text = ggplot2::element_text(family = "sans"),
+      axis.title = ggplot2::element_text(size = 12),
+      axis.text = ggplot2::element_text(size = 10),
+      axis.text.x = ggplot2::element_blank(),
       axis.ticks.x = ggplot2::element_blank(),
-      panel.grid   = ggplot2::element_blank(),
-      strip.text   = ggplot2::element_text(size = 11, face = "bold")  # facet labels
+      axis.line = ggplot2::element_line(color = "black", size = 0.5),
+      
+      # Legend styling
+      legend.title = ggplot2::element_text(size = 11),
+      legend.text = ggplot2::element_text(size = 9),
+      legend.position = "right",
+      legend.key.size = ggplot2::unit(0.8, "cm"),
+      
+      # Facet styling
+      strip.background = ggplot2::element_blank(),
+      strip.text = ggplot2::element_text(size = 11, face = "bold"),
+      
+      # Remove grid
+      panel.grid = ggplot2::element_blank()
     )
   
-  p
+  # Save to disk with explicit dimensions
+  tryCatch({
+    png_file <- file.path(out_dir, paste0("global_methylation_plot_", Sys.Date(), ".png"))
+    ggplot2::ggsave(png_file, p, width = 12, height = 6, dpi = 150, bg = "white")
+    
+    pdf_file <- file.path(out_dir, paste0("global_methylation_plot_", Sys.Date(), ".pdf"))
+    ggplot2::ggsave(pdf_file, p, width = 12, height = 6, bg = "white")
+  }, error = function(e) {
+    warning("Could not save plots: ", e$message)
+  })
+  
+  return(p)
 }

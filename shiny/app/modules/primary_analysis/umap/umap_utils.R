@@ -1,0 +1,287 @@
+prepare_umap_data <- function(
+    beta,
+    targets,
+    top_cpgs,
+    min_dist,
+    n_neighbors,
+    metric,
+    knn,
+    consensus_k_max, 
+    id_col,
+    seed
+) {
+  # Prepare inputs
+  align_res <- align_targets_to_beta_cols(beta, targets, id_col)
+  beta2 <- align_res$beta2
+  targets2 <- align_res$targets2
+  
+  # top variable CpGs
+  top_cpgs <- min(top_cpgs, nrow(beta2))
+  mat <- get_top_mad_probes(beta2, top_cpgs)
+  mat_t <- t(mat)
+  
+  # --- SANITY CHECKS --
+  n_samples <- nrow(mat_t)
+  shiny::validate(
+    shiny::need(top_cpgs >= 100,
+                paste0("Too few CpGs selected (", top_cpgs, "). Please select at least 100.")),
+    shiny::need(n_neighbors < n_samples,
+                paste0("N neighbors (", n_neighbors, ") must be smaller than number of samples (", n_samples, ").")),
+    shiny::need(knn < n_samples,
+                paste0("KNN (", knn, ") must be smaller than number of samples (", n_samples, ").")),
+    shiny::need(consensus_k_max < n_samples,
+                paste0("Consensus K max (", consensus_k_max, ") must be smaller than number of samples (", n_samples, ")."))
+  )
+  
+  # UMAP config
+  n_samples <- nrow(mat_t)
+  if (n_neighbors >= n_samples) {
+    shiny::validate(
+      shiny::need(FALSE, paste0(
+        "N neighbors (", n_neighbors, ") must be smaller than the number of samples (", n_samples, "). ",
+        "Please reduce N neighbors in the UMAP Parameters."
+      ))
+    )
+  }
+  
+  cfg <- umap::umap.defaults
+  cfg$min_dist <- min_dist
+  cfg$n_neighbors <- n_neighbors
+  cfg$metric <- metric
+  cfg$random_state <- seed
+  
+  um <- umap::umap(mat_t, config = cfg)
+  
+  # output df one row one sample
+  df <- data.frame(
+    Sample = rownames(um$layout),
+    UMAP1 = um$layout[, 1],
+    UMAP2 = um$layout[, 2],
+    stringsAsFactors = FALSE
+  )
+  
+  # attach metadata
+  df <- cbind(df, targets2[df$Sample, , drop = FALSE])
+  
+  # SNN graph + walktrap clustering
+  grph <- bluster::makeSNNGraph(as.data.frame(um$layout), k = knn, type = "rank")
+  cluster <- igraph::cluster_walktrap(grph)$membership
+  
+  # Add cluster as first metadata column directly onto df
+  cluster_col <- factor(
+    paste0("Clust", cluster),
+    levels = paste0("Clust", seq_len(consensus_k_max))
+  )
+  
+  # Reorder so consensus cluster is first metadata vlaue
+  df <- cbind(
+    df[, c("Sample", "UMAP1", "UMAP2"), drop = FALSE],
+    consensus_cluster = cluster_col,
+    df[, !colnames(df) %in% c("Sample", "UMAP1", "UMAP2"), drop = FALSE]
+  )
+  
+  # Update targets with the new consensus_cluster column
+  targets_updated <- targets2
+  targets_updated$consensus_cluster <- cluster_col[match(rownames(targets2), df$Sample)]
+  
+  # Return both
+  list(
+    umap_df = df,
+    targets_updated = targets_updated
+  )
+}
+
+prepare_umap_data <- function(
+    beta,
+    targets,
+    top_cpgs,
+    min_dist,
+    n_neighbors,
+    metric,
+    knn,
+    consensus_k_max, 
+    id_col,
+    seed
+) {
+  # Prepare inputs
+  align_res <- align_targets_to_beta_cols(beta, targets, id_col)
+  beta2 <- align_res$beta2
+  targets2 <- align_res$targets2
+  
+  # top variable CpGs
+  top_cpgs <- min(top_cpgs, nrow(beta2))
+  mat <- get_top_mad_probes(beta2, top_cpgs)
+  mat_t <- t(mat)
+  
+  # --- SANITY CHECKS --
+  n_samples <- nrow(mat_t)
+  shiny::validate(
+    shiny::need(top_cpgs >= 100,
+                paste0("Too few CpGs selected (", top_cpgs, "). Please select at least 100.")),
+    shiny::need(n_neighbors < n_samples,
+                paste0("N neighbors (", n_neighbors, ") must be smaller than number of samples (", n_samples, ").")),
+    shiny::need(knn < n_samples,
+                paste0("KNN (", knn, ") must be smaller than number of samples (", n_samples, ").")),
+    shiny::need(consensus_k_max < n_samples,
+                paste0("Consensus K max (", consensus_k_max, ") must be smaller than number of samples (", n_samples, ")."))
+  )
+  
+  # UMAP config
+  n_samples <- nrow(mat_t)
+  if (n_neighbors >= n_samples) {
+    shiny::validate(
+      shiny::need(FALSE, paste0(
+        "N neighbors (", n_neighbors, ") must be smaller than the number of samples (", n_samples, "). ",
+        "Please reduce N neighbors in the UMAP Parameters."
+      ))
+    )
+  }
+  
+  cfg <- umap::umap.defaults
+  cfg$min_dist <- min_dist
+  cfg$n_neighbors <- n_neighbors
+  cfg$metric <- metric
+  cfg$random_state <- seed
+  
+  um <- umap::umap(mat_t, config = cfg)
+  
+  # output df one row one sample
+  df <- data.frame(
+    Sample = rownames(um$layout),
+    UMAP1 = um$layout[, 1],
+    UMAP2 = um$layout[, 2],
+    stringsAsFactors = FALSE
+  )
+  
+  # attach metadata
+  df <- cbind(df, targets2[df$Sample, , drop = FALSE])
+  
+  # SNN graph + walktrap clustering
+  grph <- bluster::makeSNNGraph(as.data.frame(um$layout), k = knn, type = "rank")
+  cluster <- igraph::cluster_walktrap(grph)$membership
+  
+  # Add cluster as first metadata column directly onto df
+  cluster_col <- factor(
+    paste0("Clust", cluster),
+    levels = paste0("Clust", seq_len(consensus_k_max))
+  )
+  
+  # Reorder so consensus cluster is first metadata vlaue
+  df <- cbind(
+    df[, c("Sample", "UMAP1", "UMAP2"), drop = FALSE],
+    consensus_cluster = cluster_col,
+    df[, !colnames(df) %in% c("Sample", "UMAP1", "UMAP2"), drop = FALSE]
+  )
+  
+  # Update targets with the new consensus_cluster column
+  targets_updated <- targets2
+  targets_updated$consensus_cluster <- cluster_col[match(rownames(targets2), df$Sample)]
+  
+  # Return both
+  list(
+    umap_df = df,
+    targets_updated = targets_updated
+  )
+}
+
+
+plot_umap <- function(
+    umap_df,
+    color_by,
+    legend_position,
+    color_palette,
+    show_summary = TRUE,
+    top_cpgs,
+    min_dist,
+    n_neighbors,
+    knn,
+    consensus_k_max,
+    metric,
+    out_dir
+) {
+  
+  df <- data.frame(
+    UMAP1 = umap_df$UMAP1,
+    UMAP2 = umap_df$UMAP2,
+    Color = umap_df[[color_by]],
+    Label = umap_df$Sample
+  )
+  
+  # colour mapping — use selected palette, extend by cycling if too short
+  color_vals  <- unique(df$Color)
+  matched_colors <- get_matching_colors(color_vals, color_palette)
+  
+  # Support additional information for walktrap
+  color_label <- if (color_by == "consensus_cluster") {
+    paste0(color_by, " (knn=", knn, ", k_max=", consensus_k_max, ")")
+  } else {
+    color_by
+  }
+  
+  # summary string
+  summary_txt <- paste0(
+    "CpGs=", top_cpgs,
+    " | min_dist=", min_dist,
+    " | n_neighbors=", n_neighbors,
+    " | metric=", metric,
+    " | color=", color_label
+  )
+  
+  # base ggplot 
+  p <- ggplot2::ggplot(
+    df,
+    ggplot2::aes(
+      x = UMAP1,
+      y = UMAP2,
+      color = Color
+    )
+  ) +
+    ggplot2::geom_point(size = 2.5, alpha = 0.8) +
+    ggplot2::scale_color_manual(values = matched_colors, name = color_by) +
+    ggplot2::labs(
+      x = "UMAP 1",
+      y = "UMAP 2"
+    ) +
+    ggplot2::theme_classic() +
+    ggplot2::theme(
+      axis.title = ggplot2::element_text(size = 12),
+      axis.text = ggplot2::element_text(size = 10),
+      axis.line = ggplot2::element_line(linewidth = 0.5),
+      legend.title = ggplot2::element_text(size = 10),
+      legend.text = ggplot2::element_text(size = 9),
+      legend.position = legend_position
+    )
+  
+  # convert to plotly 
+  gp <- plotly::ggplotly(
+    p,
+    tooltip = "text"
+  )
+  
+  # add summary
+  if (show_summary) {
+    gp <- gp %>% plotly::layout(
+      title = list(
+        text = summary_txt,
+        x = 0,             
+        xanchor = "left",
+        font = list(size = 11)
+      ),
+      margin = list(t = 60) 
+    )
+  }
+
+    # Save to disk
+    tryCatch({
+      png_file <- file.path(out_dir, paste0("umap_plot_", Sys.Date(), ".png"))
+      ggplot2::ggsave(png_file, p, width = 10, height = 6.5, dpi = 150, bg = "white")
+
+      pdf_file <- file.path(out_dir, paste0("umap_plot_", Sys.Date(), ".pdf"))
+      ggplot2::ggsave(pdf_file, p, width = 10, height = 6.5, bg = "white")
+    }, error = function(e) {
+      warning("Could not save plots: ", e$message)
+    })
+
+  
+  return(gp)
+}
