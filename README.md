@@ -34,9 +34,7 @@ It ships as two independent services:
 
 ## Getting Started
 
-### Before you start — prepare required directories
-
-After cloning, create the directories the app needs to write to and set the correct permissions:
+Clone the repo and prepare required directories:
 
 ```bash
 git clone https://github.com/gcampof/M4A-shiny.git
@@ -51,17 +49,12 @@ chmod 777 ./shiny/logs ./shiny/app/data ./shiny/app/cache
 
 ---
 
-## Option A — Production (recommended for most users)
+## Option A — Get Production image from DockerHub (recommended for most users)
 
-Pulls the pre-built Shiny image from DockerHub. No build required for the Shiny service.
+Pull the pre-built Shiny image from DockerHub:
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d
-```
-
-To stop:
-```bash
-docker compose -f docker-compose.prod.yml down
 ```
 
 To update the Shiny image to the latest version:
@@ -72,7 +65,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 ---
 
-## Option B — Development (build everything locally)
+## Option B — Build everything locally
 
 Builds both images from source. The first build will take a while (~20–40 min) as it installs all R and Bioconductor packages.
 
