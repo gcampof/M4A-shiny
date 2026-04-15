@@ -1050,7 +1050,7 @@ generate_beta_matrix <- function(array, rgSet, detP, norm_method, threshold,
   # saveRDS(mSetSq_flt, file = mset_flt_path, compress = FALSE)
   
   removeNotification(notification_id)
-  notification_id <- showNotification(paset0("Finished array: ", array), type = "message", duration = 0)
+  notification_id <- showNotification(paste0("Finished array: ", array), type = "message", duration = 0)
   message("Finished array: ", array)
 
   # Cleanup

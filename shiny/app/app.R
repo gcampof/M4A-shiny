@@ -129,7 +129,17 @@ ui <- fluidPage(
   # Main content area - switches between views
   div(
     class = "content-container",
-    uiOutput("main_view")
+    
+    # Both views always in the DOM
+    div(id = "view_load",
+        load_data_ui("load_data")
+    ),
+    
+    shinyjs::hidden(
+      div(id = "view_primary",
+          primary_analysis_ui("primary_analysis")  # see note below
+      )
+    )
   )
 )
 
@@ -141,32 +151,15 @@ server <- function(input, output, session) {
   DIRS <- setup_common_dirs(cfg)
   DIRS <- setup_analysis_dir(DIRS, cfg, session)
   
-  APP_CACHE <- NULL
+  APP_CACHE <- reactiveVal(NULL)
   
   # Flags
-  module_initialized <- reactiveVal(FALSE)
+  primary_ui_initialized <- reactiveVal(FALSE)
+  primary_server_initialized <- reactiveVal(FALSE)
   heavy_components_loaded <- reactiveVal(FALSE)
   
-  # Track current view
-  current_view <- reactiveVal("load")
-  
-  # Restart session with new analysis
-  observeEvent(input$restart_session, {
-    showModal(modalDialog(
-      title = "Start New Analysis",
-      "This will reset the entire application. All unsaved data will be lost. Continue?",
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_reset", "Yes, Start Fresh", class = "btn-success")
-      ),
-      easyClose = TRUE
-    ))
-  })
-  
-  observeEvent(input$confirm_reset, {
-    removeModal()
-    js$resetPage()
-  })
+  # Cleanup on start
+  cleanup_old_analysis_dirs(DIRS$data, max_age_hours = 24)
   
   # Display session ID in navbar
   output$session_id_display <- renderUI({
@@ -183,54 +176,39 @@ server <- function(input, output, session) {
     )
   })
   
-  # Cleanup on start
-  cleanup_old_analysis_dirs(DIRS$data, max_age_hours = 24)
-  
   # Initialize data loading
   load_data_return <- load_data_server("load_data", DIRS, cfg)
   
-  # Create a reactive flag to track when data is fully ready
-  data_ready <- reactive({
-    !is.null(load_data_return$beta_merged()) &&
-      !is.null(load_data_return$targets_merged())
+  # Server also initialized at start
+  primary_analysis_server("primary_analysis", load_data_return, DIRS, APP_CACHE)
+  
+  # Simple view switching — just show/hide
+  observeEvent(load_data_return$beta_merged_ld(), {
+    req(load_data_return$beta_merged_ld())
+    APP_CACHE(load_heavy_components(session, DIRS, cfg))
+    shinyjs::hide("view_load")
+    shinyjs::show("view_primary")
   })
   
-  # Main view switcher
-  output$main_view <- renderUI({
-    if (current_view() == "load") {
-      load_data_ui("load_data")
-    } else if (current_view() == "primary") {
-      if (data_ready()) {
-        req(data_ready(), load_data_return$type_selected())
-        primary_analysis_ui("primary_analysis", load_data_return$type_selected())
-      } else {
-        div(
-          class = "text-center p-5",
-          div(class = "spinner-border text-primary", role = "status",
-              style = "width: 3rem; height: 3rem; margin-bottom: 20px;"),
-          h4("Loading analysis module...", class = "text-muted")
-        )
-      }
-    }
+  # Restart session with new analysis
+  observeEvent(input$restart_session, {
+    showModal(modalDialog(
+      title = "Start New Analysis",
+      "This will reset the entire application. All unsaved data will be lost. Continue?",
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirm_reset", "Yes, Start Fresh", class = "btn-success")
+      ),
+      easyClose = TRUE
+    ))
   })
   
-  # Only call server module ONCE when data is ready
-  observe({
-    req(data_ready())
-    if (!module_initialized()) {
-      if (!heavy_components_loaded()) {
-        APP_CACHE <<- load_heavy_components(session, DIRS, cfg)
-        heavy_components_loaded(TRUE)
-      }
-      
-      message("[App] Initializing primary analysis server module...")
-      primary_analysis_server("primary_analysis", load_data_return, DIRS, APP_CACHE)
-      module_initialized(TRUE)
-      
-      # Switch to primary analysis view
-      current_view("primary")
-    }
+  # Manage analysis reset
+  observeEvent(input$confirm_reset, {
+    removeModal()
+    js$resetPage()
   })
+  
 }
 
 shinyApp(ui, server)

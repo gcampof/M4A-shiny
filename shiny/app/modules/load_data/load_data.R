@@ -475,7 +475,7 @@ load_data_server <- function(id, DIRS, cfg) {
           
           shinyjs::hide("ld_loading_view")
           current_view("primary")
-          
+
           # Return only using beta and targets
           return(list(
             array_names_ld = array_names,
@@ -562,7 +562,7 @@ load_data_server <- function(id, DIRS, cfg) {
           separate_unselected_idats(samples_df(), selected_idats, DIRS$preprocessing)
           
           removeNotification(notification_id)
-          notification_id <- showNotification("Loading Sample Sheet...", type="message", duration=0)
+          notification_id <- showNotification("Loading Sample Sheet...", type="message", duration=3)
           parse_samplesheets(DIRS$input, DIRS$preprocessing)
           
           # Mid processing clean up
@@ -868,6 +868,7 @@ load_data_server <- function(id, DIRS, cfg) {
       
       shinyjs::hide("ld_loading_view")
       current_view("primary")
+      
     })
     
     return(list(

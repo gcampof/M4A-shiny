@@ -7,10 +7,9 @@ source("modules/primary_analysis/differential/differential_met_ui.R")
 source("modules/primary_analysis/cnv/cnv_ui.R")
 
 # UI
-primary_analysis_ui <- function(id, type_selected) {
+primary_analysis_ui <- function(id) {
   ns <- NS(id)
-  is_idats <- type_selected == "IDATS"
-  
+
   tagList(
     shinyjs::useShinyjs(),
     
@@ -96,26 +95,22 @@ primary_analysis_ui <- function(id, type_selected) {
           class = "d-flex flex-column gap-2",
           div(
             id = ns("nav_beta_matrix_wrapper"),
-            class = if (!is_idats) "nav-btn-wrapper btn-disabled-tooltip" else "nav-btn-wrapper",
-            `data-tooltip` = if (!is_idats) "Only available when loading from IDATs" else NULL,
+            class = "nav-btn-wrapper btn-disabled-tooltip",
+            `data-tooltip` = "Only available when loading from IDATs",
             actionButton(
-              ns("nav_beta_matrix"),
-              "Beta Matrix",
+              ns("nav_beta_matrix"), "Beta Matrix",
               class = "btn btn-outline-primary w-100 text-start",
-              style = "justify-content: flex-start;",
-              disabled = if (!is_idats) TRUE else NULL
+              disabled = TRUE 
             )
           ),
           div(
             id = ns("nav_qc_wrapper"),
-            class = if (!is_idats) "nav-btn-wrapper btn-disabled-tooltip" else "nav-btn-wrapper",
-            `data-tooltip` = if (!is_idats) "Only available when loading from IDATs" else NULL,
+            class = "nav-btn-wrapper btn-disabled-tooltip",
+            `data-tooltip` = "Only available when loading from IDATs",
             actionButton(
-              ns("nav_qc"),
-              "QC Report",
+              ns("nav_qc"), "QC Report",
               class = "btn btn-outline-primary w-100 text-start",
-              style = "justify-content: flex-start;",
-              disabled = if (!is_idats) TRUE else NULL
+              disabled = TRUE
             )
           ),
           actionButton(
@@ -156,14 +151,12 @@ primary_analysis_ui <- function(id, type_selected) {
           ),
           div(
             id = ns("nav_cnv_wrapper"),
-            class = if (!is_idats) "nav-btn-wrapper btn-disabled-tooltip" else "nav-btn-wrapper",
-            `data-tooltip` = if (!is_idats) "Only available when loading from IDATs" else NULL,
+            class = "nav-btn-wrapper btn-disabled-tooltip",
+            `data-tooltip` = "Only available when loading from IDATs",
             actionButton(
-              ns("nav_cnv"),
-              "CNV Analysis",
+              ns("nav_cnv"), "CNV Analysis",
               class = "btn btn-outline-primary w-100 text-start",
-              style = "justify-content: flex-start;",
-              disabled = if (!is_idats) TRUE else NULL
+              disabled = TRUE
             )
           ),
 

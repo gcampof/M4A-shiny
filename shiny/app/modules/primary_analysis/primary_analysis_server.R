@@ -11,19 +11,37 @@ source("modules/primary_analysis/cnv/cnv_utils.R")
 primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
-    
-    # Set up variables
+
+    # Unpack results form load data
     view_initialized <- reactiveVal(FALSE)
-    array_names <<- load_data_return$array_names_ld
-    mSetSq_list <<- load_data_return$mSetSq_list_ld
-    beta_merged <<- load_data_return$beta_merged_ld
-    targets_merged <<- load_data_return$targets_merged_ld
-    type_selected <<- load_data_return$type_selected()
-    umap_data <<- reactiveVal(NULL)
-    current_view <<- reactiveVal(NULL)
-    PALETTES <<- reactive({
+    array_names <- load_data_return$array_names_ld
+    mSetSq_list <- load_data_return$mSetSq_list_ld
+    beta_merged <- load_data_return$beta_merged_ld
+    targets_merged <- load_data_return$targets_merged_ld
+    
+    # Reactive states
+    umap_data <- reactiveVal(NULL)
+    current_view <- reactiveVal(NULL)
+    PALETTES <- reactive({
       do.call(reactiveValues,
               prepare_color_palettes(DIRS$custom_color_palette))
+    })
+    
+    # Enable IDAT-only controls if type is IDATS
+    observe({
+      req(load_data_return$type_selected())
+      
+      if (load_data_return$type_selected() != "IDATS") {
+        # Enable buttons
+        shinyjs::enable("nav_beta_matrix")
+        shinyjs::enable("nav_qc")
+        shinyjs::enable("nav_cnv")
+        
+        # Remove tooltip wrapper class so hover tip disappears too
+        shinyjs::removeClass("nav_beta_matrix_wrapper", "btn-disabled-tooltip")
+        shinyjs::removeClass("nav_qc_wrapper", "btn-disabled-tooltip")
+        shinyjs::removeClass("nav_cnv_wrapper", "btn-disabled-tooltip")
+      }
     })
     message("[PRIMARY_ANALYSIS] Setup complete!")
     
@@ -39,7 +57,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
       req(beta_merged() | !is.null(targets_merged()))
       
       if (!view_initialized()) {
-        if (type_selected == "IDATS") {
+        if (load_data_return$type_selected() == "IDATS") {
           update_active_button("nav_beta_matrix")
           show_view("view_beta_matrix", "Beta Matrix")
           current_view("beta_matrix")
@@ -57,6 +75,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     observe({
       req(PALETTES())
       req(length(names(input)) > 0)
+      print(PALETTES())
       update_all_palettes(session, PALETTES())
     })
     
@@ -92,30 +111,22 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     })
     
     # --- CALL NESTED SERVER MODULES ---
-    observe({
-      req(length(names(input)) > 0)
-      req(beta_merged(), targets_merged(), PALETTES())
-      mds_server(beta_merged(), targets_merged(), PALETTES(), DIRS$mds, input, output, session)
-    })
+    mds_server(beta_merged(), targets_merged(), PALETTES(), DIRS$mds, input, output, session)
+    pca_server(beta_merged(), targets_merged(), PALETTES(), DIRS$pca, input, output, session)
     
-    observe({
-      req(length(names(input)) > 0)
-      req(beta_merged(), targets_merged(), PALETTES())
-      pca_server(beta_merged(), targets_merged(), PALETTES(), DIRS$pca, input, output, session)
-    })
     
     # --- NAVIGATION LOGIC ---
     observeEvent(input$nav_beta_matrix, {
-        current_view("beta_matrix")
-        update_active_button("nav_beta_matrix")
-        show_view("view_beta_matrix", "Beta Matrix")
+      current_view("beta_matrix")
+      update_active_button("nav_beta_matrix")
+      show_view("view_beta_matrix", "Beta Matrix")
     })
     
     observeEvent(input$nav_qc, {
       has_array_data <- !is.null(array_names()) && length(array_names()) > 0
-        current_view("qc")
-        update_active_button("nav_qc")
-        show_view("view_qc", "QC Report")
+      current_view("qc")
+      update_active_button("nav_qc")
+      show_view("view_qc", "QC Report")
     })
     
     observeEvent(input$nav_mds, {
@@ -155,9 +166,9 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     })
     
     observeEvent(input$nav_cnv, {
-        current_view("cnv")
-        update_active_button("nav_cnv")
-        show_view("view_cnv", "CNV")
+      current_view("cnv")
+      update_active_button("nav_cnv")
+      show_view("view_cnv", "CNV")
     }) 
     
     # --- DOWNLOAD BUTTONS BETA/TARGETS ---
@@ -532,7 +543,8 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
         input$global_met_id_col,
         input$global_met_comparison_col,
         input$global_met_color_palette,
-        input$global_met_comparison_type
+        input$global_met_comparison_type,
+        APP_CACHE()
       )
       
       # For custom comparison, require groups to be selected
@@ -556,7 +568,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
           comparison_type = input$global_met_comparison_type,
           group1 = input$global_met_group1,
           group2 = input$global_met_group2,
-          annot = APP_CACHE$raw_annot,
+          annot = APP_CACHE()$raw_annot,
           color_palette = PALETTES()$all_palettes[[input$global_met_color_palette]],
           out_dir = DIRS$global_met
         )
@@ -627,7 +639,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     # --- DIFFERENTIAL METHYLATION LOGIC ---
     # Use eventReactive directly
     diff_met_data <- eventReactive(input$diff_met_run_analysis, {
-      req(beta_merged(), targets_merged(), input$diff_met_id_col)
+      req(beta_merged(), targets_merged(), input$diff_met_id_col, APP_CACHE())
       
       showNotification("Running differential methylation analysis...", type = "message", duration = 3)
       
@@ -635,7 +647,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
         result <- prepare_differential_methylation_data(
           beta_merged(), 
           targets_merged(), 
-          APP_CACHE$built_annot,
+          APP_CACHE()$built_annot,
           input$diff_met_id_col,
           input$diff_met_comparison_col,
           input$diff_met_baseline,
@@ -981,9 +993,9 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     
     # FGSEA tables
     output$diff_met_fgsea_gobp_table <- DT::renderDataTable({
-      req(diff_met_data())
+      req(diff_met_data(),APP_CACHE())
       tryCatch({
-        fgsea_gobp <- get_fgsea(diff_met_data(), APP_CACHE$pathways, "gobp", DIRS$differential)
+        fgsea_gobp <- get_fgsea(diff_met_data(), APP_CACHE()$pathways, "gobp", DIRS$differential)
         make_dt(fgsea_gobp)
       }, error = function(e) {
         error_msg <- e$message
@@ -994,9 +1006,9 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     })
     
     output$diff_met_fgsea_kegg_table <- DT::renderDataTable({
-      req(diff_met_data())
+      req(diff_met_data(), APP_CACHE())
       tryCatch({
-        fgsea_kegg <- get_fgsea(diff_met_data(), APP_CACHE$pathways, "kegg", DIRS$differential)
+        fgsea_kegg <- get_fgsea(diff_met_data(), APP_CACHE()$pathways, "kegg", DIRS$differential)
         make_dt(fgsea_kegg)
       }, error = function(e) {
         error_msg <- e$message
@@ -1007,9 +1019,9 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     })
     
     output$diff_met_fgsea_hallmark_table <- DT::renderDataTable({
-      req(diff_met_data())
+      req(diff_met_data(), APP_CACHE())
       tryCatch({
-        fgsea_hallmark <- get_fgsea(diff_met_data(), APP_CACHE$pathways, "hallmark", DIRS$differential)
+        fgsea_hallmark <- get_fgsea(diff_met_data(), APP_CACHE()$pathways, "hallmark", DIRS$differential)
         make_dt(fgsea_hallmark)
       }, error = function(e) {
         error_msg <- e$message
