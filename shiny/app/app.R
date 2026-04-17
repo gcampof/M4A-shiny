@@ -185,7 +185,7 @@ server <- function(input, output, session) {
   # Simple view switching — just show/hide
   observeEvent(load_data_return$beta_merged_ld(), {
     req(load_data_return$beta_merged_ld())
-    APP_CACHE(load_heavy_components(session, DIRS, cfg))
+    load_heavy_components(session, DIRS, cfg, APP_CACHE)
     shinyjs::hide("view_load")
     shinyjs::show("view_primary")
   })

@@ -31,7 +31,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     observe({
       req(load_data_return$type_selected())
       
-      if (load_data_return$type_selected() != "IDATS") {
+      if (load_data_return$type_selected() == "IDATS") {
         # Enable buttons
         shinyjs::enable("nav_beta_matrix")
         shinyjs::enable("nav_qc")
@@ -75,7 +75,6 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     observe({
       req(PALETTES())
       req(length(names(input)) > 0)
-      print(PALETTES())
       update_all_palettes(session, PALETTES())
     })
     
@@ -559,6 +558,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
       showNotification("Running global methylation analysis...", type = "message", duration = 3)
       
       tryCatch({
+        print(APP_CACHE())
         # Return a list with parameters and data for plotting
         list(
           beta = beta_merged(),

@@ -472,10 +472,6 @@ load_data_server <- function(id, DIRS, cfg) {
           targets_merged(beta_and_targets$targets)
           
           notification_id <- showNotification("Complete!", type="message", duration=3)
-          
-          shinyjs::hide("ld_loading_view")
-          current_view("primary")
-
           # Return only using beta and targets
           return(list(
             array_names_ld = array_names,
@@ -865,10 +861,6 @@ load_data_server <- function(id, DIRS, cfg) {
       
       # Clean up loaded QC data to free memory
       loaded_qc_data <- reactiveValues()
-      
-      shinyjs::hide("ld_loading_view")
-      current_view("primary")
-      
     })
     
     return(list(

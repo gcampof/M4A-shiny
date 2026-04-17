@@ -289,8 +289,7 @@ stop_logging <- function() {
 }
 
 
-load_heavy_components <- function(session, DIRS, cfg) {
-  # Show loading modal
+load_heavy_components <- function(session, DIRS, cfg, APP_CACHE) {
   showModal(modalDialog(
     title = div(
       class = "text-center",
@@ -299,7 +298,7 @@ load_heavy_components <- function(session, DIRS, cfg) {
     ),
     div(
       class = "text-center",
-      div(class = "spinner-border text-primary mb-3", 
+      div(class = "spinner-border text-primary mb-3",
           role = "status",
           style = "width: 3rem; height: 3rem;"),
       p("This may take a moment...", class = "text-muted"),
@@ -310,18 +309,21 @@ load_heavy_components <- function(session, DIRS, cfg) {
     size = "s"
   ))
   
-  # Force UI update to show modal
-  Sys.sleep(0.1)
+  session$onFlushed(function() {
+    tryCatch({
+      source("modules/common/all_imports.R", local = TRUE)
+      cache <- setup_cache(DIRS, cfg)
+      APP_CACHE(cache)
+      removeModal()
+    }, error = function(e) {
+      removeModal()
+      showModal(modalDialog(
+        title = "Error",
+        paste("Failed to load components:", e$message),
+        footer = modalButton("OK")
+      ))
+    })
+  }, once = TRUE)
   
-  # Load all the heavy libraries
-  source("modules/common/all_imports.R", local = TRUE)
-  
-  # Setup cache
-  APP_CACHE <- setup_cache(DIRS, cfg)
-  
-  # Close modal
-  removeModal()
-  
-  # Return the cache
-  return(APP_CACHE)
+  invisible(NULL)  # explicit: this function intentionally returns nothing
 }
