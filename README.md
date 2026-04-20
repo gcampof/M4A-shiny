@@ -31,21 +31,7 @@ For every analysis, you can customize both the **analytical parameters** and the
 
 ## Test Dataset
 
-We provide two options to get you up and running with real data right away and getting familiarized with the application.
-
-### Option 1 - Dataset already ready to use
-
 We provide a pre-downloaded dataset from [GSE267015](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE267015) (n = 70 samples, EPIC + 450k arrays), from the retinoblastoma study published in [PMID 39079981](https://pubmed.ncbi.nlm.nih.gov/39079981/). You can download it directly from this repository's [Releases](../../releases) page.
-
-### Option 2 - Download any GEO dataset yourself
-
-We provide a ready-to-use shell script (`download_geo.sh`) that downloads any public GEO dataset given its accession ID. Usage:
-
-```bash
-bash download_geo.sh GSE267015
-```
-
-The script will fetch the IDATs and sample sheet automatically.
 
 ---
 
@@ -142,7 +128,6 @@ sudo docker logs m4a-shiny
 .
 ├── docker-compose.yml
 ├── docker-compose.prod.yml
-├── download_geo.sh  
 ├── rstudio/
 │   └── Dockerfile
 └── shiny/
