@@ -5,6 +5,7 @@
 A pre-built Docker image is available on Docker Hub: [gcampof/methylation4all-shiny](https://hub.docker.com/r/gcampof/methylation4all-shiny), allowing you to get started quickly without building from source.
 
 Just launch it and open your browser.
+
 ---
 
 ## What M4A Can Do
