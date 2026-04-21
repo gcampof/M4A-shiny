@@ -43,10 +43,14 @@ RUN R -e 'devtools::install_github("hovestadtlab/conumee2", subdir = "conumee2",
 RUN mkdir -p /home/shiny/.cache/R/ExperimentHub && \
     chown -R shiny:shiny /home/shiny/.cache
 
+# Create runtime directionres with correct ownership
+RUN mkdir -p /srv/shiny-server/data /srv/shiny-server/cache && \
+    chown -R shiny:shiny /srv/shiny-server
+
 COPY shiny-server.conf /etc/shiny-server/shiny-server.conf
+COPY app/ /srv/shiny-server/
 
 WORKDIR /srv/shiny-server
 
 EXPOSE 3838
 CMD ["/usr/bin/shiny-server"]
-

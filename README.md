@@ -43,6 +43,7 @@ Before you begin, make sure you have:
 - [Docker Compose](https://docs.docker.com/compose/install/) (v2.39 or later)
 - At least **24 GB of RAM** available
 - At least **30 GB of free disk space**
+
 ---
 
 ## Installation & Launch
@@ -60,11 +61,10 @@ cd M4A-shiny
 
 ```bash
 mkdir -p ./shiny/logs ./shiny/app/data ./shiny/app/cache
-sudo chown -R 999:999 ./shiny/logs
 chmod 777 ./shiny/logs ./shiny/app/data ./shiny/app/cache
 ```
 
-> These directories are where the app writes logs and analysis results. The `sudo chown` command gives the internal app user the right permissions.
+> These directories are where the app writes logs, user uploads, and analysis results. The app code itself is bundled inside the Docker image and does not need to be present on your machine.
 
 ### Step 3 - Start M4A
 
@@ -86,14 +86,16 @@ The M4A interface will load and you're ready to start your analysis.
 
 ---
 
-## Updating to the Latest Version
+## Updating to a New Version
 
-To pull the most recent version of M4A:
+To update M4A, edit `docker-compose.prod.yml` and change the image tag to the new version, then pull and restart:
 
 ```bash
 docker compose -f docker-compose.prod.yml pull shiny
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+Your data in `./shiny/app/data/` is not affected by updates.
 
 ---
 
@@ -117,7 +119,7 @@ ls ./shiny/logs/
 cat ./shiny/logs/<logfile>.log
 
 # Or check the container logs directly
-sudo docker logs m4a-shiny
+docker logs m4a-shiny
 ```
 
 ---
@@ -128,6 +130,7 @@ sudo docker logs m4a-shiny
 .
 ├── docker-compose.yml
 ├── docker-compose.prod.yml
+├── .dockerignore
 ├── rstudio/
 │   └── Dockerfile
 └── shiny/
@@ -142,10 +145,7 @@ sudo docker logs m4a-shiny
 ## Notes
 
 - Analysis results are saved to `./shiny/app/data/` on your machine and persist between sessions. Folders older than 24 hours are cleaned up automatically on next launch.
-- Changes to `app.R` are picked up without rebuilding the image - just restart the service with `docker compose restart shiny`.
 - M4A is configured with `restart: unless-stopped`, so it will automatically start again after a system reboot as long as Docker is running.
-
----
 
 ---
 
@@ -191,10 +191,26 @@ docker compose up -d shiny
 docker compose up -d rstudio
 ```
 
+### Publishing a New Image to DockerHub
+
+After making changes to the app, build and push a new versioned image:
+
+```bash
+docker build -t gcampof/methylation4all-shiny:1.x.x ./shiny
+docker push gcampof/methylation4all-shiny:1.x.x
+
+# Also update the latest tag
+docker tag gcampof/methylation4all-shiny:1.x.x gcampof/methylation4all-shiny:latest
+docker push gcampof/methylation4all-shiny:latest
+```
+
+Then update the image tag in `docker-compose.prod.yml` and commit.
+
 ### Development Notes
 
-- The RStudio service mounts your local code at `/home/rstudio/project/shiny` inside the container, so you can edit files directly in RStudio and see changes in real time.
-- To use the production image for Shiny but run RStudio locally, mix flags: `docker compose -f docker-compose.prod.yml up -d shiny` and `docker compose up -d rstudio`.
+- The dev `docker-compose.yml` mounts `./shiny/app` into the container, so you can edit `app.R` locally and pick up changes with `docker compose restart shiny` — no rebuild needed.
+- The production `docker-compose.prod.yml` pulls from DockerHub and does **not** mount the app code. Only `logs/`, `data/`, and `cache/` are bind-mounted for persistence.
+- To use the production image for Shiny but run RStudio locally: `docker compose -f docker-compose.prod.yml up -d shiny` and `docker compose up -d rstudio`.
 
 ### Dependencies
 

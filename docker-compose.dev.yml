@@ -1,18 +1,7 @@
 services:
-  rstudio:
-    build: ./rstudio
-    container_name: m4a-rstudio
-    ports:
-      - "3939:8787"
-    environment:
-      PASSWORD: rstudio
-    volumes:
-      - ./shiny/app:/home/rstudio/project/shiny
-    restart: unless-stopped
- 
   shiny:
     build: ./shiny
-    container_name: m4a-shiny
+    container_name: m4a-shiny-dev
     ports:
       - "3838:3838"
     volumes:
@@ -20,4 +9,15 @@ services:
       - ./shiny/logs:/var/log/shiny-server
     environment:
       - R_CONFIG_ACTIVE=default
+    restart: unless-stopped
+
+  rstudio:
+    build: ./rstudio
+    container_name: m4a-rstudio
+    ports:
+      - "3939:8787"
+    volumes:
+      - ./shiny:/home/rstudio/project/shiny
+    environment:
+      - PASSWORD=rstudio
     restart: unless-stopped

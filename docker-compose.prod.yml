@@ -1,12 +1,14 @@
 services:
   shiny:
-    build: ./shiny
+    image: gcampof/methylation4all-shiny:1.0.0
     container_name: m4a-shiny
     ports:
       - "3838:3838"
     volumes:
-      - ./shiny/app:/srv/shiny-server
-      - ./shiny/logs:/var/log/shiny-server
+      - ./shiny/logs:/var/log/shiny-server   
+      - ./shiny/app/data:/srv/shiny-server/data 
+      - ./shiny/app/cache:/srv/shiny-server/cache
     environment:
       - R_CONFIG_ACTIVE=default
     restart: unless-stopped
+ 
