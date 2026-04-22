@@ -76,13 +76,13 @@ prepare_umap_data <- function(
   # Reorder so consensus cluster is first metadata vlaue
   df <- cbind(
     df[, c("Sample", "UMAP1", "UMAP2"), drop = FALSE],
-    consensus_cluster = cluster_col,
+	snn_walktrap_cluster = cluster_col,
     df[, !colnames(df) %in% c("Sample", "UMAP1", "UMAP2"), drop = FALSE]
   )
   
   # Update targets with the new consensus_cluster column
   targets_updated <- targets2
-  targets_updated$consensus_cluster <- cluster_col[match(rownames(targets2), df$Sample)]
+  targets_updated$snn_walktrap_cluster <- cluster_col[match(rownames(targets2), df$Sample)]
   
   # Return both
   list(

@@ -178,14 +178,12 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     
     # --- DOWNLOAD TARGETS ---
     output$download_targets <- downloadHandler(
-      filename = function() {
-        "targets_merged.csv"
-      },
-      content = function(file) {
-        src <- file.path(DIRS$beta, "merged", "targets_merged.csv")
-        file.copy(src, file)
-      }
-    )
+	  filename = function() "targets_merged.csv",
+	  content = function(file) {
+		req(targets_merged())
+		write.csv(targets_merged(), file, row.names = TRUE)
+	  }
+	)
     
     # --- BETA MATRIX BOXPLOT UI ---
     output$beta_matrix_tabs <- renderUI({
@@ -631,6 +629,21 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
       })
     }) %>% bindCache(heatmap_plot_params())  # Cache based on parameters
     
+    # Store the new consensus cluster as metadata
+    observeEvent(cached_heatmap_ht(), {
+	  req(heatmap_cc_data(), input$heatmap_col_k)
+	  
+	  cc        <- heatmap_cc_data()$cc
+	  col_k     <- isolate(input$heatmap_col_k)
+	  col_class <- cc[[col_k]]$consensusClass 
+	  
+	  updated <- targets_merged()
+	  updated$heatmap_consensus_cluster <- factor(
+		paste0("CC", col_class[match(rownames(updated), names(col_class))])
+	  )
+	  targets_merged(updated)
+	})
+		
     # Plot output - just renders the cached plot
     output$heatmap_plot <- renderPlot({
       req(cached_heatmap_ht())
@@ -666,28 +679,22 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
     )
     
     # Download handler for consensus class TSV
-    output$heatmap_download_consensus <- downloadHandler(
-      filename = function() {
-        paste0("ConsensusClass_k", colK, ".tsv")
-      },
-      content = function(file) {
-        # Construct the expected filename based on col_k parameter
-        consensus_file <- file.path(
-          DIRS$heatmap, 
-          paste0("ConsensusClass_k", input$heatmap_col_k, ".tsv")
-        )
-        
-        # Validate that the file exists
-        validate(
-          need(file.exists(consensus_file), 
-               paste0("Consensus class file not found: consensus_class_k", 
-                      input$heatmap_col_k, ".tsv. Please run analysis first."))
-        )
-        
-        # Copy the file to the download location
-        file.copy(consensus_file, file)
-      }
-    )
+	output$heatmap_download_consensus <- downloadHandler(
+	  filename = function() {
+		paste0("ConsensusClass_k", input$heatmap_col_k, ".tsv")  # ✅
+	  },
+	  content = function(file) {
+		consensus_file <- file.path(
+		  DIRS$heatmap,
+		  paste0("ConsensusClass_k", input$heatmap_col_k, ".tsv")
+		)
+		validate(
+		  need(file.exists(consensus_file),
+			   paste0("Consensus class file not found. Please run analysis first."))
+		)
+		file.copy(consensus_file, file)
+	  }
+	)
     
     
     # --- GLOBAL METHYLATION LOGIC ---
