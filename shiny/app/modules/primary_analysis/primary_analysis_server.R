@@ -638,7 +638,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE) {
 	  col_class <- cc[[col_k]]$consensusClass 
 	  
 	  updated <- targets_merged()
-	  updated$heatmap_consensus_cluster <- factor(
+	  updated$consensus_cluster <- factor(
 		paste0("CC", col_class[match(rownames(updated), names(col_class))])
 	  )
 	  targets_merged(updated)
