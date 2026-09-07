@@ -79,6 +79,20 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
         shinyjs::removeClass("nav_cnv_wrapper", "btn-disabled-tooltip")
       }
     })
+
+    # The two data downloads ship disabled and nothing was ever turning them
+    # back on, so clicking them followed an empty href and returned the app's own
+    # HTML page instead of a file. Enable them once there is data to download.
+    observe({
+      if (!is.null(beta_merged())) {
+        shinyjs::enable("download_beta")
+        shinyjs::removeClass("download_beta_wrapper", "btn-disabled-tooltip")
+      }
+      if (!is.null(targets_merged())) {
+        shinyjs::enable("download_targets")
+        shinyjs::removeClass("download_targets_wrapper", "btn-disabled-tooltip")
+      }
+    })
     message("[PRIMARY_ANALYSIS] Setup complete!")
     
     # Set qc path.
@@ -238,7 +252,12 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
         }
 
         rds <- file.path(DIRS$beta, "merged", "beta_merged.rds")
-        validate(need(file.exists(rds), "Beta matrix not available yet."))
+        if (!file.exists(rds)) {
+          # validate()/req() here would hand the browser an HTML error page
+          # instead of a download, which looks like a broken button.
+          writeLines("The beta matrix is not available yet. Load or generate it first.", file)
+          return(invisible(NULL))
+        }
         beta <- readRDS(rds)
         data.table::fwrite(
           data.table::data.table(CpG = rownames(beta), beta),
@@ -251,8 +270,12 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
     output$download_targets <- downloadHandler(
       filename = function() "targets_merged.csv",
       content = function(file) {
-        req(targets_merged())
-        write.csv(targets_merged(), file, row.names = TRUE)
+        tg <- targets_merged()
+        if (is.null(tg)) {
+          writeLines("No samplesheet loaded yet.", file)
+          return(invisible(NULL))
+        }
+        write.csv(tg, file, row.names = TRUE)
       }
     )
     
