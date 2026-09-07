@@ -979,8 +979,8 @@ adjustFFPE <- function(methy, unmethy, tissue_type) {
   
   message("Adjusting by FFPE/Frozen tissue type...")
   batch <- ifelse(tissue_type == "FFPE", 2, 1)
-  methy.ba <- 2^limma:removeBatchEffect(log2(methy + 1), batch)
-  unmethy.ba <- 2^limma:removeBatchEffect(log2(unmethy + 1), batch)
+  methy.ba <- 2^limma::removeBatchEffect(log2(methy + 1), batch)
+  unmethy.ba <- 2^limma::removeBatchEffect(log2(unmethy + 1), batch)
   
   methy.ba / (methy.ba + unmethy.ba + 100)
 }
@@ -1080,8 +1080,7 @@ generate_beta_boxplot_static <- function(array, beta, out_dir) {
 # failure-rate CSV.
 generate_beta_matrix <- function(array, rgSet, detP, norm_method, threshold,
                                  filter_dir, beta_dir, mean_detP = NULL) {
-  # Supplies aggregate_to_probes() for finalizeBeta(). Attached here rather than
-  # in all_imports.R: it costs 2.5 GB resident, and only this step needs it.
+  # Supplies aggregate_to_probes() for finalizeBeta()
   library(IlluminaHumanMethylationEPICv2anno.20a1.hg38)
 
   message("Processing array: ", array)
@@ -1106,37 +1105,23 @@ generate_beta_matrix <- function(array, rgSet, detP, norm_method, threshold,
   rm(rgSet)          # nothing downstream needs it
   gc()
 
-  ## ---- 2. Raw & normalized beta/M values ----
-  # maybe use DelayedArray?
-  # beta_unf_path <- file.path(array_beta_dir, paste0("000_beta_unfiltered_", array, ".rds"))
-  # beta_unf <- calculateBeta(rgSet, mSetSq)$beta
-  # saveRDS(beta_unf, file = beta_unf_path, compress = FALSE)
-  # rm(beta_unf)
-
-  ## ---- 3. Detection p-value filtering ----
+  ## ---- 2. Detection p-value filtering ----
   message("[beta] ", "Detection p-value filtering...")
   mSetSq <- filterDetectionP(detP, mSetSq, threshold)
   rm(detP)
   gc()
 
-  ## ---- 4. Probe filtering ----
+  ## ---- 3. Probe filtering ----
   message("[beta] ", "Probe filtering...")
   mSetSq_flt <- filterProbes(mSetSq, filter_dir)
-
-  # mSetSq is only kept in order to be written out. Doing that here rather than
-  # at the end of the function drops ~3 GB before the FFPE/finalizeBeta/boxplot
-  # stretch, which is where this stage peaks. Same files, written earlier.
   mset_path <- file.path(array_beta_dir, paste0("002_unfilteredData_", array, ".rds"))
   message("Saving mSetSq to: ", mset_path)
   saveRDS(mSetSq, file = mset_path, compress = FALSE)
-  # Sidecar with just the sample metadata: the CNV dropdowns need only this, and
-  # deserialising the whole MethylSet to read it blocked the app for tens of
-  # seconds every time a selector changed.
   saveRDS(as.data.frame(minfi::pData(mSetSq)), file = mset_pdata_path(mset_path))
   rm(mSetSq)
   gc()
 
-  ## ---- 5. FFPE / Frozen adjustment ----
+  ## ---- 4. FFPE / Frozen adjustment ----
   message("[beta] ", "FFPE/ Froxen adjustment...")
   meth   <- minfi::getMeth(mSetSq_flt)
   unmeth <- minfi::getUnmeth(mSetSq_flt)
@@ -1144,41 +1129,38 @@ generate_beta_matrix <- function(array, rgSet, detP, norm_method, threshold,
   rm(meth, unmeth, mSetSq_flt)
   gc()
 
-  ## ---- 6. Array-specific handling ----
-  # if (array == "EPIC_V2") {
-  #   message("EPIC_V2 detected → aggregating to probes")
-  #   beta <- aggregate_to_probes(beta)
-    # mVals_unf <- minfi::getM(mSetSq)
-    # mVals_unf <- aggregate_to_probes(mVals_unf)
-    # unfiltered_data <- mSetSq
-    # filtered_dat <- mSetSq_flt
-  # }
-  # else {
-  #   mVals_unf <- minfi::getM(mSetSq)
-  # }
-  # rm(mVals_unf)
+  ## ---- 5. Array-specific handling ----
+  if (array == "EPIC_V2") {
+    message("EPIC_V2 detected → aggregating to probes")
+    beta <- aggregate_to_probes(beta)
+    mVals_unf <- minfi::getM(mSetSq)
+    mVals_unf <- aggregate_to_probes(mVals_unf)
+    unfiltered_data <- mSetSq
+    filtered_dat <- mSetSq_flt
+  }
+  else {
+    mVals_unf <- minfi::getM(mSetSq)
+  }
+  rm(mVals_unf)
 
-  ## ---- 7. Final SNP / XY / cross-hyb filtering ----
+  ## ---- 6. Final SNP / XY / cross-hyb filtering ----
   message("[beta] ", "Final SNP/XY/cross-hyb filtering...")
   beta <- finalizeBeta(beta)
 
-  ## ---- 8. Beta QCplots ----
+  ## ---- 7. Beta QCplots ----
   # plotPostQC(mSetSq_flt, array, array_beta_dir)
 
-  ## ---- 9. Beta Boxplots ---
+  ## ---- 8. Beta Boxplots ---
   message("[beta] ", "Generating Beta boxplots...")
   generate_beta_boxplot_static(array, beta, out_dir = array_beta_dir)
 
-  ## ---- 10. Save outputs ----
+  ## ---- 9. Save outputs ----
   beta_path <- file.path(array_beta_dir, paste0("001_beta_", array, ".rds"))
 
   message("[beta] ", "Saving beta matrix...")
   message("Saving beta to: ", beta_path)
   saveRDS(beta, file = beta_path, compress = FALSE)
   rm(beta)
-  
-  # message("Saving mSetSq_flt to: ", mset_flt_path)
-  # saveRDS(mSetSq_flt, file = mset_flt_path, compress = FALSE)
   
   message("[beta] ", paste0("Finished array: ", array))
   message("Finished array: ", array)
@@ -1278,24 +1260,15 @@ merge_beta_matrix_from_disk <- function(beta_paths, beta_merge_dir) {
 
   message("Saving merged beta matrix: ", nrow(beta_merged), " probes x ",
           ncol(beta_merged), " samples")
-  # compress = FALSE for the same reason as detP: this is the artifact every
-  # analysis worker reads, so save and load speed beat disk footprint.
   saveRDS(beta_merged, file = out_path, compress = FALSE)
-  # The CSV export is written on demand by the download handler instead of here:
-  # it costs ~0.9 GB per analysis and most runs never download it.
   write_beta_meta(out_path, beta_merged)
 
   invisible(out_path)
 }
 
 
-# Runs in a worker: reading a full beta-matrix CSV is minutes of work on a large
-# EPIC dataset and used to block every other user's session.
-# Returns paths and small values only -- the matrix stays on disk.
 extract_beta_and_targets <- function(input_dir, beta_dir, zip_paths = NULL){
 
-  # Unzipped here rather than in the app process, which would stall every other
-  # session. One archive at a time, but the fileInput accepts several.
   if (length(zip_paths) > 0) {
     for (i in seq_along(zip_paths)) {
       m4a_progress(i - 1L, length(zip_paths) + 3L,
@@ -1332,10 +1305,6 @@ extract_beta_and_targets <- function(input_dir, beta_dir, zip_paths = NULL){
       # Check if it's a beta matrix file
       # Typically has numeric columns (except possibly first column with probe names)
       if (is.null(beta_matrix_file)) {
-        # Check if it looks like a beta matrix:
-        # - Multiple columns (at least 2)
-        # - Mostly numeric data
-        # - Often has row names/probe IDs
         if (ncol(df) >= 2) {
           numeric_cols <- sapply(df, is.numeric)
           numeric_proportion <- sum(numeric_cols) / ncol(df)
@@ -1400,10 +1369,6 @@ extract_beta_and_targets <- function(input_dir, beta_dir, zip_paths = NULL){
   
   # Convert to matrix
   beta <- as.matrix(beta)
-
-  # Analysis workers load the beta matrix from disk rather than receiving it over
-  # the process boundary, so both ingest paths must leave an .rds behind (the
-  # IDAT path already writes one in merge_beta_matrix_from_disk).
   beta_out <- file.path(merged_dir, "beta_merged.rds")
   saveRDS(beta, beta_out, compress = FALSE)
   write_beta_meta(beta_out, beta)
@@ -1424,12 +1389,6 @@ extract_beta_and_targets <- function(input_dir, beta_dir, zip_paths = NULL){
 }
 
 # Archive extraction + IDAT organisation, run as one worker job.
-#
-# This is the first thing that happens after an upload and it used to run inline
-# in the shared app process: unzipping several GB and then walking every IDAT
-# froze every other connected session for the duration. Nothing here needs the
-# session -- the uploaded archives are already on disk and the result is a small
-# samples table -- so it goes to the pool like every other long step.
 run_idat_ingest <- function(zip_paths, input_dir, preprocessing_dir) {
   n_zip <- length(zip_paths)
   for (i in seq_len(n_zip)) {
@@ -1462,12 +1421,6 @@ run_idat_ingest <- function(zip_paths, input_dir, preprocessing_dir) {
 
 
 # IDAT ingest + QC, run as one worker job.
-#
-# Everything here is file-driven: IDATs are already on disk and the RGChannelSets
-# and QC reports are written back to disk, so only small values cross the process
-# boundary (a samples table in, a list of paths out). This is the longest blocking
-# step in the app and it runs on every IDAT analysis, so it is also the one that
-# matters most for keeping other users' sessions alive.
 run_qc_ingest <- function(samples_df, selected_idats, input_dir, preprocessing_dir, qc_dir) {
   # Count the arrays up front so the bar runs on one continuous scale instead of
   # sitting at "2 of 3" for the twenty minutes the actual work takes.
@@ -1508,14 +1461,6 @@ run_qc_ingest <- function(samples_df, selected_idats, input_dir, preprocessing_d
 
 
 # Beta-matrix generation for every array, run as one worker job.
-#
-# The last of the long blocking stages (15-40 min for 70 EPIC samples) and, like
-# QC, it runs on every IDAT analysis. It reads the RGChannelSets the QC stage left
-# on disk, so only thresholds and paths go in. The merged matrix is returned as a
-# path rather than a value: merge_beta_matrix_from_disk already writes it, and
-# sending ~450 MB back through the worker channel would undo the point.
-#
-# thresholds is a named character/numeric vector, one entry per array.
 run_beta_generation <- function(arrays, thresholds, qc_results, norm_method,
                                 qc_dir, filter_dir, beta_dir, preprocessing_dir,
                                 analysis_dir) {
@@ -1597,9 +1542,6 @@ run_beta_generation <- function(arrays, thresholds, qc_results, norm_method,
   targets_path <- file.path(beta_merge_dir, "targets_merged.rds")
   saveRDS(targets_result$targets_merged, targets_path)
 
-  # The manifest is written here, in the worker, rather than by the session that
-  # started the job. A user who closes the tab mid-run still has the analysis
-  # completed and recorded, so returning to the URL picks it up.
   write_analysis_manifest(
     analysis_dir = analysis_dir,
     type         = "IDATS",

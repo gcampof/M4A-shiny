@@ -24,6 +24,23 @@ load_data_ui <- function(id) {
         border: 2px solid #28a745 !important;
         background-color: #f0fff4 !important;
       }
+      .welcome-mark {
+        font-size: 3.5rem;
+        color: #2c7fb8;
+        line-height: 1;
+        margin-bottom: 1rem;
+      }
+      .welcome-title {
+        font-size: 2.1rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        margin-bottom: 0.5rem;
+      }
+      .welcome-subtitle {
+        font-size: 1.15rem;
+        color: #6c757d;
+        margin-bottom: 0;
+      }
       .step-indicator {
         display: flex;
         justify-content: center;
@@ -90,11 +107,12 @@ load_data_ui <- function(id) {
     div(
       class = "load-data-container p-5",
       
-      # Title
+      # Welcome
       div(
         class = "text-center mb-5",
-        h2(icon("database"), " Load Your Data", class = "mb-2"),
-        p("Upload methylation data to begin analysis", class = "text-muted")
+        div(class = "welcome-mark", icon("dna")),
+        h1("Welcome to Met4All", class = "welcome-title"),
+        p("Upload methylation data to begin analysis", class = "welcome-subtitle")
       ),
       
       # Step indicators
