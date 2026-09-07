@@ -8,8 +8,6 @@
 #   M4A_THREADS_PER_JOB threads inside each worker
 #
 # Keep M4A_MAX_JOBS * M4A_THREADS_PER_JOB <= host cores.
-# Memory is the binding constraint and scales with cohort size, not just job
-# count: a 252-sample EPIC ingest peaks at ~16 GB.
 
 m4a_env_int <- function(name, default) {
   value <- suppressWarnings(as.integer(Sys.getenv(name)))
@@ -24,10 +22,6 @@ m4a_min_free_gb <- function() m4a_env_int("M4A_MIN_FREE_GB", 15L)
 
 
 # --- Disk headroom ----------------------------------------------------------
-# A single 70-sample EPIC run leaves roughly 7-13 GB behind (raw upload, sorted
-# copy, RGChannelSet, MethylSet, beta matrix, exports). Nothing used to check
-# for space, so a full volume surfaced as an opaque failure mid-analysis.
-
 # Free space in GB on the filesystem holding `path`, or NA if it cannot be read.
 m4a_free_disk_gb <- function(path) {
   probe <- path
@@ -71,14 +65,8 @@ m4a_check_disk <- function(path, upload_bytes = 0, expansion = 6) {
 # Peak RSS, not CPU, is what limits this app, but predicting a job's peak from
 # sample count proved unreliable, so nothing is refused up front. Instead a job
 # checks its remaining headroom at each stage boundary and stops itself with a
-# readable error while there is still room to unwind -- rather than being killed
-# mid-allocation by the OOM killer, which surfaces as "Connection reset".
+# readable error while there is still room to unwind
 
-# Headroom in GB before the limit that will actually kill us.
-#
-# /proc/meminfo is NOT that limit inside a container: it reports the host, so it
-# happily shows 17 GB free while the cgroup sits at 23 of 24 GB. Read the cgroup
-# first and fall back to /proc/meminfo only when running outside one.
 m4a_memory_headroom_gb <- function() {
   cg <- function(f) {
     v <- suppressWarnings(tryCatch(readLines(f, n = 1L, warn = FALSE),

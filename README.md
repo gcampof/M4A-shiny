@@ -111,6 +111,77 @@ docker compose -f docker-compose.prod.yml down
 
 ---
 
+## Concurrency and Scalability
+
+Met4All is built to be shared. Several people can use one deployment at the same
+time, and one person's analysis never freezes anyone else's session.
+
+**How it works.** The app itself stays light and only handles the interface. Every
+long step — IDAT import and QC, beta-matrix generation, differential methylation,
+CNV, consensus clustering — is handed to a separate worker process. While an
+analysis runs you get a progress bar naming the current step, and you can keep
+browsing. If more analyses are requested than there are workers, the extra ones
+queue and start automatically, and you are told your position.
+
+Analyses keep running if you close the tab. The address in your browser bar
+identifies your analysis, so you can come back to it later and pick up where you
+left off.
+
+### Resource requirements
+
+Memory is what limits how much you can run at once, and it scales with cohort
+size rather than with the number of users. Measured on a 252-sample cohort
+(220 EPIC + 32 450K):
+
+| | Typical | Peak observed |
+|---|---|---|
+| App itself, idle | ~250 MB | — |
+| Each ready worker | ~1.5 GB | — |
+| One analysis running | — | ~17 GB |
+| Scratch disk per analysis | 7–13 GB | — |
+
+The defaults (24 GB RAM, 30 GB disk) comfortably support one large cohort at a
+time. Bigger cohorts, or more simultaneous analyses, need proportionally more
+memory. If an analysis does run short of memory it stops with a clear message
+rather than being killed, and the rest of the app keeps working.
+
+### Tuning
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `M4A_MAX_JOBS` | 2 | Analyses running at the same time. Extra ones queue. |
+| `M4A_THREADS_PER_JOB` | 4 | Threads inside each analysis. Keep `MAX_JOBS x THREADS_PER_JOB` within the machine's core count. |
+| `M4A_MEM_LIMIT` | 24g | Memory ceiling for the container. |
+| `M4A_MIN_FREE_GB` | 15 | Refuse to start if free disk is below this. |
+
+Set them in the `environment:` block of your compose file, for example:
+
+```yaml
+    environment:
+      - R_CONFIG_ACTIVE=default
+      - M4A_MAX_JOBS=4
+```
+
+### Running several instances
+
+One instance is enough for most groups. When it is not, `docker-compose.scale.yml`
+runs several instances behind a reverse proxy, with no change to the app or the
+image:
+
+```bash
+docker compose -f docker-compose.scale.yml up -d --scale shiny=4
+```
+
+The app is still served on **http://localhost:3838** (set `M4A_PORT` to change
+it). Each user stays on the instance that served them, which the proxy handles
+automatically. This also isolates failures: if one instance has a problem, the
+others carry on.
+
+This is the same container-level orchestration Docker Swarm and Kubernetes
+provide, so sites already running either can deploy the image there unchanged.
+
+---
+
 ## Accessing Logs
 
 If something doesn't look right, logs are written to `./shiny/logs/` on your machine.
@@ -203,44 +274,6 @@ docker compose -f docker-compose.dev.yml up -d --build shiny
 # RStudio only
 docker compose -f docker-compose.dev.yml up -d --build rstudio
 ```
-
-### Running for Multiple Users
-
-Met4All is designed to be shared. Several people can use the same instance at
-the same time: the long steps (IDAT import and QC, beta-matrix generation,
-differential methylation, CNV, consensus clustering) run in separate worker
-processes, so one person's analysis does not freeze anyone else's session. While
-an analysis runs you see a progress bar with the current step, and if more
-analyses are requested than there are workers, the extra ones queue and start
-automatically.
-
-You can tune this with environment variables:
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `M4A_MAX_JOBS` | 2 | How many analyses run at the same time. Extra ones queue, and the user is told their position. |
-| `M4A_THREADS_PER_JOB` | 2 | Threads used inside each analysis. Keep `MAX_JOBS x THREADS_PER_JOB` within the number of cores on the machine. |
-| `M4A_MIN_FREE_GB` | 15 | Refuse to start an analysis if there is less free disk space than this. |
-
-Each running analysis needs its own memory, so raising `M4A_MAX_JOBS` needs a
-machine with proportionally more RAM than the requirements above.
-
-Analyses keep running if you close the tab. The address in your browser bar
-identifies your analysis, so you can come back to it later and pick up where you
-left off.
-
-#### Serving more people at once
-
-If a single machine is not enough, `docker-compose.scale.yml` runs several
-instances behind a reverse proxy, with no changes to the app or the image:
-
-```bash
-docker compose -f docker-compose.scale.yml up -d --scale shiny=4
-```
-
-The app is served on the same **http://localhost:3838** (set `M4A_PORT` to
-change it). Users are kept on the instance that served them, which the proxy
-handles automatically — no extra configuration needed.
 
 ### Publishing a New Image to DockerHub
 
