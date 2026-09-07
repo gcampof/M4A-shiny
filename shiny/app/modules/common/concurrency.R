@@ -9,7 +9,7 @@
 #
 # Keep M4A_MAX_JOBS * M4A_THREADS_PER_JOB <= host cores.
 # Memory is the binding constraint and scales with cohort size, not just job
-# count: a 252-sample EPIC ingest peaks at ~16 GB. See m4a_estimate_job_gb().
+# count: a 252-sample EPIC ingest peaks at ~16 GB.
 
 m4a_env_int <- function(name, default) {
   value <- suppressWarnings(as.integer(Sys.getenv(name)))
@@ -68,47 +68,61 @@ m4a_check_disk <- function(path, upload_bytes = 0, expansion = 6) {
 }
 
 # --- Memory headroom ---------------------------------------------------------
-# Peak RSS, not CPU, is what limits this app. Pair this with a container
-# mem_limit so an overrun kills the container rather than the host.
+# Peak RSS, not CPU, is what limits this app, but predicting a job's peak from
+# sample count proved unreliable, so nothing is refused up front. Instead a job
+# checks its remaining headroom at each stage boundary and stops itself with a
+# readable error while there is still room to unwind -- rather than being killed
+# mid-allocation by the OOM killer, which surfaces as "Connection reset".
 
-# Available memory in GB, or NA if unreadable.
-m4a_available_ram_gb <- function() {
+# Headroom in GB before the limit that will actually kill us.
+#
+# /proc/meminfo is NOT that limit inside a container: it reports the host, so it
+# happily shows 17 GB free while the cgroup sits at 23 of 24 GB. Read the cgroup
+# first and fall back to /proc/meminfo only when running outside one.
+m4a_memory_headroom_gb <- function() {
+  cg <- function(f) {
+    v <- suppressWarnings(tryCatch(readLines(f, n = 1L, warn = FALSE),
+                                   error = function(e) character(0)))
+    if (length(v) == 0L || v[1] == "max") return(NA_real_)
+    suppressWarnings(as.numeric(v[1]))
+  }
+
+  # cgroup v2, then v1
+  for (pair in list(c("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+                    c("/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                      "/sys/fs/cgroup/memory/memory.usage_in_bytes"))) {
+    lim <- cg(pair[1]); use <- cg(pair[2])
+    # An "unlimited" cgroup reports a huge sentinel; treat it as absent.
+    if (!is.na(lim) && !is.na(use) && lim < 2^62) return((lim - use) / 1024^3)
+  }
+
   tryCatch({
-    if (!file.exists("/proc/meminfo")) return(NA_real_)
-    lines <- readLines("/proc/meminfo", n = 60L, warn = FALSE)
-    hit <- grep("^MemAvailable:", lines, value = TRUE)
+    hit <- grep("^MemAvailable:", readLines("/proc/meminfo", n = 60L, warn = FALSE),
+                value = TRUE)
     if (length(hit) == 0L) return(NA_real_)
-    kb <- as.numeric(sub("^MemAvailable:\\s*([0-9]+).*$", "\\1", hit[1]))
-    if (is.na(kb)) NA_real_ else kb / 1024^2
+    as.numeric(sub("^MemAvailable:\\s*([0-9]+).*$", "\\1", hit[1])) / 1024^2
   }, error = function(e) NA_real_)
 }
 
-# Rough peak for one ingest job, calibrated on a measured run: 220 EPIC + 32
-# 450K peaked at 16.1 GB. The slope is dominated by minfi::qcReport.
-m4a_estimate_job_gb <- function(n_samples, array_type = "EPIC") {
-  per_sample <- switch(toupper(as.character(array_type)),
-                       "450K"    = 0.040,
-                       "EPIC_V2" = 0.085,
-                       0.070)          # EPIC and anything unrecognised
-  2.0 + per_sample * max(as.numeric(n_samples), 1)
-}
+m4a_min_headroom_gb <- function() m4a_env_int("M4A_MIN_HEADROOM_GB", 2L)
 
-# Refuse to start when memory is clearly short. Never blocks when availability
-# cannot be determined.
-m4a_check_memory <- function(n_samples, array_type = "EPIC", what = "This analysis") {
-  need <- m4a_estimate_job_gb(n_samples, array_type)
-  have <- m4a_available_ram_gb()
-  if (is.na(have)) return(invisible(NA_real_))
+# Called at stage boundaries. Collects garbage before judging, so a transient dip
+# right after a big allocation does not abort a job that would have recovered.
+m4a_memory_checkpoint <- function(what = "This analysis") {
+  floor_gb <- m4a_min_headroom_gb()
 
-  if (have < need) {
-    stop(sprintf(
-      paste0("%s needs roughly %.0f GB of memory for %s %s samples, but only ",
-             "%.1f GB is available. Wait for the running analyses to finish, or ",
-             "start it on a machine with more memory."),
-      what, need, format(n_samples), array_type, have),
-      call. = FALSE)
-  }
-  invisible(have)
+  free <- m4a_memory_headroom_gb()
+  if (is.na(free) || free >= floor_gb) return(invisible(free))
+
+  gc(full = TRUE)
+  free <- m4a_memory_headroom_gb()
+  if (is.na(free) || free >= floor_gb) return(invisible(free))
+
+  stop(sprintf(
+    paste0("%s stopped: only %.1f GB of memory headroom left (needs at least ",
+           "%.0f GB to continue safely). Try fewer samples at once, or give the ",
+           "container more memory with M4A_MEM_LIMIT."),
+    what, free, floor_gb), call. = FALSE)
 }
 
 
@@ -320,6 +334,10 @@ m4a_progress_path <- function(dir) file.path(dir, ".m4a_progress.rds")
 
 # Worker-side. Cheap enough to call between steps of a long analysis.
 m4a_progress <- function(value, total, detail = "") {
+  # Every stage boundary already calls this, which makes it the natural place to
+  # check headroom. Raises, so it must sit outside the tryCatch below.
+  m4a_memory_checkpoint(if (nzchar(detail)) detail else "This analysis")
+
   dir <- getOption("m4a.progress_dir")
   if (is.null(dir) || !nzchar(dir) || !dir.exists(dir)) return(invisible(NULL))
 

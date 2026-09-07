@@ -231,9 +231,6 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
         "beta_merged.csv"
       },
       content = function(file) {
-        # In beta-upload mode the user's own CSV is already here; in IDAT mode it
-        # is generated now rather than on every run. fwrite is ~11x faster than
-        # write.csv on a matrix this size (~2 s vs ~24 s for 800k x 70).
         src <- file.path(DIRS$beta, "merged", "beta_merged.csv")
         if (file.exists(src)) {
           file.copy(src, file)
@@ -872,8 +869,6 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
     heatmap_analysis_trigger <- reactiveVal(0)
     
     # Store the rendered heatmap plot for downloads
-    # Consensus clustering runs in a worker: it is the expensive half, and at the
-    # top of the CpG slider the row dendrogram alone builds a ~800 MB matrix.
     heatmap_task <- ExtendedTask$new(function(args, app_dir) {
       m4a_submit("prepare_heatmap_cc", args, app_dir, session_dir = DIRS$analysis)
     })
@@ -932,9 +927,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
     })
 
     # Appearance changes rebuild only the Heatmap object, which is now cheap
-    # because the clustering arrived with the worker result. bindCache went with
-    # it: its key hashed the whole cc_data, and being app-scoped it could serve
-    # one session a plot computed for another.
+    # because the clustering arrived with the worker result
     cached_heatmap_result <- reactive({
       req(heatmap_cc_data())
       tryCatch(
@@ -958,10 +951,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
       cached_heatmap_result()$ht
     })
     
-    # Store consensus cluster properly into targets_merged.
-    # This also writes the ConsensusClass TSV, deliberately OUTSIDE the cached
-    # reactive above: its cache is app-scoped, so on a cross-session hit the file
-    # would never be written into this session's results dir.
+    # Store consensus cluster properly into targets_merged
     observeEvent(cached_heatmap_result(), {
       req(cached_heatmap_result(), input$heatmap_id_col)
       col_class <- cached_heatmap_result()$col_class
@@ -1629,8 +1619,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
     # stayed hidden only because the old eventReactive consuming it was lazy.
     run_analysis_trigger <- reactiveVal(0)
 
-    # BED path and the two rendered plot paths. Declarations were dropped in
-    # 4396dec while the twelve uses were left behind, breaking every CNV plot.
+    # BED path and the two rendered plot paths
     cnv_bed_path      <- reactiveVal(NULL)
     cached_pileup_png <- reactiveVal(NULL)
     cached_sample_png <- reactiveVal(NULL)
@@ -1692,11 +1681,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
       run_analysis_trigger(run_analysis_trigger() + 1)
     })
     
-    # Prepare data in a worker process.
-    #
-    # ExtendedTask must not read reactives, so every parameter is snapshotted at
-    # invoke() time below and passed by value. Only paths and scalars cross into
-    # the worker; it reads the MethylSet from disk itself.
+    # Prepare data in a worker process
     cnv_task <- ExtendedTask$new(function(args, app_dir) {
       m4a_submit("prepare_cnv_data", args, app_dir, session_dir = DIRS$analysis)
     })
@@ -1705,8 +1690,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
 
     app_dir <- normalizePath(getwd())
 
-    # One progress panel, driven by whichever task is running. Registered per
-    # task because each has its own status; only the running one renders.
+    # One progress panel, driven by whichever task is running
     for (tsk in c("mds_task", "pca_task", "umap_task", "predict_task",
                   "heatmap_task", "global_task", "diff_task", "cnv_task")) {
       local({
