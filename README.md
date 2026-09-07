@@ -246,13 +246,6 @@ docker logs m4a-shiny
 
 ---
 
-## Notes
-
-- Analysis results are saved to `./shiny/app/data/` on your machine and persist between sessions. Folders older than 24 hours are cleaned up automatically on next launch.
-- Met4All is configured with `restart: unless-stopped`, so it will automatically start again after a system reboot as long as Docker is running.
-
----
-
 ## For Developers
 
 The section below is intended for users who want to modify or extend Met4All.
