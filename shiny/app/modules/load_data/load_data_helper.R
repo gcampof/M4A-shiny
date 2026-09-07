@@ -1066,29 +1066,15 @@ generate_beta_matrix <- function(array, rgSet, detP, norm_method, threshold,
   rm(meth, unmeth, mSetSq_flt)
   gc()
 
-  ## ---- 5. Array-specific handling ----
-  if (array == "EPIC_V2") {
-    message("EPIC_V2 detected → aggregating to probes")
-    beta <- aggregate_to_probes(beta)
-    mVals_unf <- minfi::getM(mSetSq)
-    mVals_unf <- aggregate_to_probes(mVals_unf)
-    unfiltered_data <- mSetSq
-    filtered_dat <- mSetSq_flt
-  }
-  else {
-    mVals_unf <- minfi::getM(mSetSq)
-  }
-  rm(mVals_unf)
-
-  ## ---- 6. Final SNP / XY / cross-hyb filtering ----
+  ## ---- 5. Final SNP / XY / cross-hyb filtering ----
   message("[beta] ", "Final SNP/XY/cross-hyb filtering...")
   beta <- finalizeBeta(beta)
 
-  ## ---- 7. Beta Boxplots ---
+  ## ---- 6. Beta Boxplots ---
   message("[beta] ", "Generating Beta boxplots...")
   generate_beta_boxplot_static(array, beta, out_dir = array_beta_dir)
 
-  ## ---- 8. Save outputs ----
+  ## ---- 7. Save outputs ----
   beta_path <- file.path(array_beta_dir, paste0("001_beta_", array, ".rds"))
 
   message("[beta] ", "Saving beta matrix...")
