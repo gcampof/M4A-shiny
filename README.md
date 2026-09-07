@@ -111,55 +111,74 @@ docker compose -f docker-compose.prod.yml down
 
 ---
 
-## Concurrency and Scalability
+## Sharing Met4All Between Users
 
-Met4All is built to be shared. Several people can use one deployment at the same
-time, and one person's analysis never freezes anyone else's session.
+Met4All is meant to be left running and shared. Several people can use the same
+deployment at once, and nobody has to wait for anyone else to finish.
 
-**How it works.** The app itself stays light and only handles the interface.
-Every long-running step is handed to a separate worker process. While an
-analysis runs you get a progress bar naming the current step, and you can keep
-browsing. If more analyses are requested than there are workers, the extra ones
-queue and start automatically, and you are told your position.
+What it provides natively:
 
-Analyses keep running if you close the tab. The address in your browser bar
-identifies your analysis, so you can come back to it later and pick up where you
-left off.
+- **Your session stays responsive while an analysis runs.** You can look at
+  earlier results on another tab, while a new beta matrix
+  for your next analysis is being built.
+- **Close the tab whenever you like.** The address in your browser bar identifies
+  your analysis. Come back to it later, on the same machine or another one, and
+  it picks up where it left off. After X minutes that session will be closed and you won't be able to acces it
+- **Requests queue** If everyone starts an analysis at once,
+  the extras wait their turn and you are told your position.
+
+**How it works.** The interface runs in one process that deliberately does no
+heavy lifting (explain the package used breifly). Every long step is handed to a pool of separate worker processes,
+which is why one person's forty-minute run cannot freeze anyone else's browser.
+
+
+### One instance or several
+
+**Start with `docker-compose.prod.yml`.** A single instance already runs analyses
+in parallel and keeps everyone's interface responsive. It is one command,
+one container, and nothing else to administer.
+
+If you need **more analyses running at once**, raise `M4A_MAX_JOBS` first. That is
+one line in your compose file and it needs no extra infrastructure. Memory is the
+limit, guarder around 22 GB per simultaneous analysis.
+
+Move to `docker-compose.scale.yml` when you want something a single instance
+cannot give you:
+
+- **Failure isolation.** With one instance, a crash disconnects everyone. With
+  several, it affects only the people on that instance and the rest carry on.
+- **Many people using the interface simultaneously.** Drawing heatmaps, rendering
+  CNV plots and preparing downloads all happen in each instance's interface
+  process. With a dozen active users that becomes the bottleneck, and more
+  instances spread it out.
+
+```bash
+docker compose -f docker-compose.scale.yml up -d --scale shiny=4
+```
+
+The app is served on the same address (**http://localhost:3838**, or set
+`M4A_PORT`). Each user is kept on the instance that served them, handled
+automatically. Note that both options run on one machine, so several instances
+divide the same memory rather than adding any.
 
 ### Resource requirements
 
-Memory and disk both scale with cohort size rather than with the number of users,
-so the size of your largest dataset is what to plan around.
-
-**Memory**
+Memory and disk scale with **dataset size**, not with the number of users, so plan
+around your largest dataset. Measured end to end on the test dataset (68 samples:
+48 EPIC and 20 450K):
 
 | | |
 |---|---|
+| Peak memory, one analysis | ~5 GB |
 | App itself, idle | ~250 MB |
 | Each ready worker | ~1.5 GB |
-| One analysis, 250 samples | ~17 GB peak |
+| Disk, complete analysis | ~3.9 GB |
 
-**Disk**, measured end to end on two cohorts:
+As a rough
+guide, allow **60 MB of working space per sample**.
 
-| Cohort | Raw IDATs | QC | Beta | Total |
-|---|---|---|---|---|
-| 68 samples (48 EPIC, 20 450K) | 1.6 GB | 1.0 GB | 1.4 GB | **3.9 GB** |
-| 252 samples (220 EPIC, 32 450K) | 6.1 GB | 3.5 GB | ~5 GB | **~15 GB** |
-
-That is roughly 60 MB of scratch per sample for a complete analysis, most of it
-the raw IDATs and the intermediate QC objects. Both can be deleted once the beta
-matrix exists.
-
-**CPU.** Each running analysis uses about one core during import and QC, because
-those steps are inherently sequential. `M4A_THREADS_PER_JOB` speeds up the later
-stages that use threaded libraries, such as the dimensionality reductions and the
-enrichment tests. So `M4A_MAX_JOBS` is what determines how busy the machine gets
-during ingest.
-
-The defaults (24 GB RAM, 30 GB disk) comfortably support one large cohort at a
-time. Bigger cohorts, or more simultaneous analyses, need proportionally more of
-both. If an analysis does run short of memory it stops with a clear message
-rather than being killed, and the rest of the app keeps working.
+Peak memory grows with the cohort: a 68-sample run peaks near 22 GB. The
+defaults (24 GB RAM, 30 GB disk) comfortably handle one large dataset at a time.
 
 ### Tuning
 
@@ -177,24 +196,6 @@ Set them in the `environment:` block of your compose file, for example:
       - R_CONFIG_ACTIVE=default
       - M4A_MAX_JOBS=4
 ```
-
-### Running several instances
-
-One instance is enough for most groups. When it is not, `docker-compose.scale.yml`
-runs several instances behind a reverse proxy, with no change to the app or the
-image:
-
-```bash
-docker compose -f docker-compose.scale.yml up -d --scale shiny=4
-```
-
-The app is still served on **http://localhost:3838** (set `M4A_PORT` to change
-it). Each user stays on the instance that served them, which the proxy handles
-automatically. This also isolates failures: if one instance has a problem, the
-others carry on.
-
-This is the same container-level orchestration Docker Swarm and Kubernetes
-provide, so sites already running either can deploy the image there unchanged.
 
 ---
 
