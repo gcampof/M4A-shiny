@@ -36,19 +36,6 @@ ARRAY_SUPPORTED <- list(
 )
 
 # === load_data_helper.R ===
-col_vector<-c(
-  "#0d570b", "#54c40a", "#E41A1C", "#d97009", "#52367d", "#874c23", "#bfa21d",
-  "#6998b5", "#8c8b8b", "#03465e",  "#e080c3", "#9d83d6", "#14b89c", "#2a4880",
-  "#86f793", "#A6761D", "#E31A1C", "#FCCDE5", "#E6AB02", "#F4CAE4", "#FFF2AE",
-  "#F781BF", "#CCEBC5", "#8DA0CB", "#E78AC3", "#A6CEE3", "#FFFFCC", "#7570B3",
-  "#666666", "#984EA3", "#7FC97F", "#FC8D62", "#CCCCCC", "#CAB2D6", "#F2F2F2",
-  "#B2DF8A", "#FDC086", "#FFFF33", "#CCEBC5", "#80B1D3", "#D9D9D9", "#FBB4AE",
-  "#4DAF4A", "#66C2A5", "#E6F5C9", "#8DD3C7", "#1F78B4", "#B15928", "#FED9A6",
-  "#E7298A", "#D95F02", "#FDDAEC", "#B3B3B3", "#FF7F00", "#FFFFB3", "#A6D854",
-  "#33A02C", "#FDB462", "#386CB0", "#BEBADA", "#E5C494", "#B3E2CD", "#FDBF6F",
-  "#E5D8BD", "#6A3D9A", "#1B9E77", "#FFED6F", "#B3CDE3", "#A65628", "#FDCDAC",
-  "#BEAED4", "#999999", "#F1E2CC"
-)
 
 
 # Path of the small pData sidecar written next to a saved MethylSet.
@@ -184,12 +171,6 @@ parse_idat_files <- function(input_dir, preprocessing_dir) {
   n <- length(idat_files)
   m4a_progress(0, n, paste0("Organising ", n, " IDAT files"))
 
-  # Move (don't copy) and decompress if needed. The extracted upload and the
-  # working directory are on the same volume, so file.rename is a metadata
-  # operation while file.copy rewrites every byte -- ~1.8 GB of pointless I/O
-  # for a 70-sample EPIC run, and it left the raw copy behind as well.
-  # file.copy is kept as the fallback for the cross-device case, where rename
-  # fails rather than doing the copy itself.
   for (i in seq_len(n)) {
     idat_file <- idat_files[i]
     if (grepl("\\.gz$", idat_file, ignore.case = TRUE)) {
@@ -382,8 +363,6 @@ parse_samplesheets <- function(input_dir, preprocessing_dir) {
         dir.create(array_dir, recursive = TRUE)
       }
       df_array <- df_clean[df_clean$Array_Type == array_type, , drop = FALSE]
-      # Optionally drop helper columns like BaseName if you don't want them in final sheet
-      # df_array <- df_array[, !(colnames(df_array) %in% "BaseName")]
       readr::write_csv(df_array, file.path(array_dir, "SampleSheet.csv"))
       message("Saved SampleSheet for ", array_type, " (", nrow(df_array), " samples)")
     }
@@ -523,7 +502,7 @@ generate_detection_p_barplot_summary <- function(array, summary, threshold,
 
   ggplot(plot_df, aes(x = Sample, y = MeanDetP, fill = Group)) +
     geom_col() +
-    scale_fill_manual(values = col_vector) +
+    scale_fill_manual(values = get_matching_colors(levels(plot_df$Group))) +
     geom_hline(
       yintercept = threshold,
       color = "red",
@@ -551,7 +530,7 @@ generate_detection_p_barplot <- function(array, rgSet, detP, threshold,
   
   ggplot(plot_df, aes(x = Sample, y = MeanDetP, fill = Group)) +
     geom_col() +
-    scale_fill_manual(values = col_vector) +
+    scale_fill_manual(values = get_matching_colors(levels(plot_df$Group))) +
     geom_hline(
       yintercept = threshold,
       color = "red",
@@ -573,10 +552,6 @@ generate_detection_p_barplot <- function(array, rgSet, detP, threshold,
 
 # progress_base / progress_total let the caller fold this function's steps into
 # one continuous bar instead of restarting it at 0 half way through a long run.
-# Per-sample QC statistics for the review screen, written by the worker so the
-# app process never has to load the RGChannelSet or detP itself. Failure counts
-# are precomputed for the thresholds the UI offers.
-
 M4A_QC_THRESHOLDS <- c(0.01, 0.05, 0.10)
 
 qc_summary_path <- function(array_qc_dir, array) {
@@ -696,9 +671,7 @@ load_qc_data_for_arrays_batch <- function(preprocessing_dir, qc_dir,
     
     # Read in chunks into preallocated assay matrices. minfi holds every IDAT of
     # one call in memory before building the matrices, so chunking bounds the
-    # peak. Addresses are intersected as we go because IDATs of different
-    # manifest versions can share an array folder, and a single read.metharray.exp
-    # call reduces to their common addresses.
+    # peak
     step(paste0("Reading ", n_samples, " ", array, " samples"))
 
     read_chunks <- split(seq_len(n_samples), ceiling(seq_len(n_samples) / read_chunk))
@@ -779,8 +752,7 @@ load_qc_data_for_arrays_batch <- function(preprocessing_dir, qc_dir,
 
     # Column blocks into a preallocated matrix. detectionP copies the whole Red
     # and Green assays out of whatever it is handed, so chunking keeps the live
-    # heap (and R's GC cost, which is what made this slow) down. Exact: each
-    # column's background comes from its own control probes.
+    # heap (and R's GC cost, which is what made this slow) down. 
     step(paste0("Calculating detection p-values for ", array))
     message("Calculating detection p-values...")
 
@@ -843,18 +815,7 @@ load_qc_data_for_arrays_batch <- function(preprocessing_dir, qc_dir,
 
 
 # Methods whose output for a sample depends only on that sample, so processing
-# them in passes is arithmetically the same as one call. Verified bit-identical
-# on 60 real EPIC samples, and it is the difference between finishing and being
-# OOM-killed: preprocessNoob on 220 EPIC samples in one call needs >22 GB.
-# minfi's noob uses dyeMethod = "single" by default, fitting background and dye
-# correction from each sample's own control probes.
-#
-# Deliberately NOT in this list:
-#   quantile, funnorm  pool information across samples -- chunking them really
-#                      would introduce a batch effect.
-#   illumina           normalizes against a reference sample index, and chunked
-#                      output differed (by ~2e-15, so probably just floating
-#                      point, but it is not exactly identical so it runs whole).
+# them in passes is arithmetically the same as one call
 M4A_PER_SAMPLE_NORM <- c("ssnoob", "raw")
 
 normalizeMeth <- function(rgSet, norm_method) {
@@ -897,24 +858,6 @@ normalizeMeth <- function(rgSet, norm_method) {
   gc(full = TRUE)
   out
 }
-
-
-# calculateBeta <- function(rgSet, mSetSq) {
-#   methy_unorm <- minfi::getMeth(preprocessRaw(rgSet))
-#   unmethy_unorm <- minfi::getUnmeth(preprocessRaw(rgSet))
-#   beta_unorm <- methy_unorm / (methy_unorm + unmethy_unorm + 100)
-#   
-#   methy <- minfi::getMeth(mSetSq)
-#   unmethy <- minfi::getUnmeth(mSetSq)
-#   beta <- methy / (methy + unmethy + 100)
-#   
-#   list(
-#     beta = beta,
-#     beta_unorm = beta_unorm,
-#     methy = methy,
-#     unmethy = unmethy
-#   )
-# }
 
 filterDetectionP <- function(detP, mSetSq, threshold) {
   detP <- detP[match(minfi::featureNames(mSetSq), rownames(detP)), ]
@@ -1005,9 +948,7 @@ generate_beta_boxplot_static <- function(array, beta, out_dir) {
   # Calculate boxplot statistics
   message("  Calculating boxplot statistics...")
   
-  # Per-sample five-number summary, computed column-wise. Melting the matrix to
-  # long format first would build a ~56M-row tibble (~1.5 GB) for 800k x 70 just
-  # to produce one row per sample.
+  # Per-sample five-number summary, computed column-wise
   beta <- as.matrix(beta)
   quants <- matrixStats::colQuantiles(beta, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
 
@@ -1061,8 +1002,6 @@ generate_beta_boxplot_static <- function(array, beta, out_dir) {
       panel.grid.minor.y = element_blank()
     )
   
-  # 0.3 in per sample so labels stay readable, but capped: ggplot2 refuses
-  # anything over 50 in, so any cohort above ~167 samples used to abort here.
   plot_width <- min(40, max(10, n_samples * 0.3))
 
   # Save as PNG
@@ -1076,8 +1015,6 @@ generate_beta_boxplot_static <- function(array, beta, out_dir) {
 }
 
 
-# mean_detP is passed in: the caller already computed it for the barplot and the
-# failure-rate CSV.
 generate_beta_matrix <- function(array, rgSet, detP, norm_method, threshold,
                                  filter_dir, beta_dir, mean_detP = NULL) {
   # Supplies aggregate_to_probes() for finalizeBeta()
@@ -1147,14 +1084,11 @@ generate_beta_matrix <- function(array, rgSet, detP, norm_method, threshold,
   message("[beta] ", "Final SNP/XY/cross-hyb filtering...")
   beta <- finalizeBeta(beta)
 
-  ## ---- 7. Beta QCplots ----
-  # plotPostQC(mSetSq_flt, array, array_beta_dir)
-
-  ## ---- 8. Beta Boxplots ---
+  ## ---- 7. Beta Boxplots ---
   message("[beta] ", "Generating Beta boxplots...")
   generate_beta_boxplot_static(array, beta, out_dir = array_beta_dir)
 
-  ## ---- 9. Save outputs ----
+  ## ---- 8. Save outputs ----
   beta_path <- file.path(array_beta_dir, paste0("001_beta_", array, ".rds"))
 
   message("[beta] ", "Saving beta matrix...")
@@ -1225,9 +1159,7 @@ merge_matrix <- function(x, y) {
 }
 
 
-# Combine the per-array beta matrices. intersect + cbind rather than
-# merge(by = "row.names"), which coerced to a data.frame -- so beta_merged.rds
-# changed class depending on how many arrays were in the run.
+# Combine the per-array beta matrices
 merge_beta_matrix_from_disk <- function(beta_paths, beta_merge_dir) {
   out_path <- file.path(beta_merge_dir, "beta_merged.rds")
 

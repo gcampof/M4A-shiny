@@ -1,22 +1,9 @@
-# Bootstrap run inside each analysis worker.
-#
 # Workers are plain R processes with none of the app loaded, so they set their
-# own thread caps and load their own packages. Everything here is memoised per
-# worker via an option, so the (slow) Bioconductor load is paid once per worker
-# rather than once per job — which is why the pool uses persistent daemons
-# instead of spawning a process per analysis.
-#
-# Nothing in this file, or in anything it sources, may call Shiny session
-# functions (showNotification, shiny::validate, req): there is no session here.
-
-# `heavy = FALSE` loads only what the upload/ingest step needs. That step does
-# unzipping and file moves, no Bioconductor at all, and the full stack costs
-# ~100 s to attach -- which the user was waiting through before anything started.
+# own thread caps and load their own packages. 
 m4a_worker_init <- function(app_dir, heavy = TRUE) {
   # The marker lives in globalenv alongside the functions it guards: mirai clears
   # a daemon's globalenv between tasks but R options persist, so an option-based
-  # flag would outlive the definitions it vouched for. It records the level, so a
-  # light worker still upgrades when a heavy job lands on it.
+  # flag would outlive the definitions it vouched for.
   level <- get0(".m4a_worker_ready", envir = globalenv(), ifnotfound = "")
   if (identical(level, "heavy") || (identical(level, "light") && !heavy)) {
     return(invisible(TRUE))
@@ -27,9 +14,6 @@ m4a_worker_init <- function(app_dir, heavy = TRUE) {
   source("modules/common/concurrency.R")
   m4a_apply_thread_caps()
 
-  # A worker has no graphics device. Without this, any plotting call that is not
-  # wrapped in an explicit png()/pdf() opens Rplots.pdf in the working directory,
-  # which lives inside the image and is read-only under Apptainer/Singularity.
   options(device = function(...) grDevices::pdf(NULL))
 
   suppressPackageStartupMessages({

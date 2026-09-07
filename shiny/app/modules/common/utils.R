@@ -305,6 +305,31 @@ get_built_in_color_palettes <- function(){
 }
 
 
+# Default palette for plots that have no palette selector of their own (the QC
+# detection-p barplots). Qualitative Brewer sets while they have enough distinct
+# colours, then viridis, which generates any n.
+m4a_default_palette <- function(n) {
+  if (n <= 8L)       RColorBrewer::brewer.pal(max(n, 3L), "Dark2")
+  else if (n <= 12L) RColorBrewer::brewer.pal(max(n, 3L), "Paired")
+  else               viridis::viridis(n)
+}
+
+
+# Map a set of values to colours, as a NAMED vector so a group keeps its colour
+# across plots. Lives here rather than in primary_analysis/ because load_data
+# needs it too, and the light worker does not source primary_analysis.
+get_matching_colors <- function(color_vals, color_palette = m4a_default_palette) {
+  color_vals  <- unique(as.character(color_vals))
+  n_needed    <- length(color_vals)
+  if (n_needed == 0L) return(character(0))
+  base_colors <- color_palette(n_needed)
+  # Palettes can return fewer colours than asked (viridis excepted) or more
+  # (brewer.pal has a minimum of 3), so recycle then truncate.
+  if (length(base_colors) < n_needed) base_colors <- rep_len(base_colors, n_needed)
+  setNames(base_colors[seq_len(n_needed)], color_vals)
+}
+
+
 # Load custom palettes from directory
 # `dirs` may name several directories: the shared one shipped with the image and,
 # when a user uploads one, their own session directory. Uploads are kept per

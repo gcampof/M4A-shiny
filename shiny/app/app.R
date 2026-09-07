@@ -28,18 +28,14 @@ library(tools)
 library(matrixStats)
 library(ggpubr)
 
-# reactlog is deliberately OFF: it grows without bound for the life of the shared
-# R process and its /reactlog endpoint exposes every session's reactive graph.
-# Set M4A_REACTLOG=1 locally if you need it for debugging.
 options(shiny.reactlog = nzchar(Sys.getenv("M4A_REACTLOG")))
 options(shiny.maxRequestSize = 10 * 1024^3)
 
-# Must run before the worker pool spawns: daemons inherit the thread budget from
-# the environment at their own startup. This process keeps one thread.
+# Must run before the worker pool spawns, this process keeps one thread.
 m4a_apply_thread_caps(local_threads = 1L)
 
-# The worker pool starts lazily on the first heavy analysis; make sure it does
-# not outlive the app.
+# The worker pool starts lazily on the first heavy analysis, 
+# it should not outlive the app in case no clear shutdown
 onStop(function() m4a_stop_workers())
 
 # JavaScript reset code
@@ -192,19 +188,13 @@ server <- function(input, output, session) {
   cfg  <- config::get()
   DIRS <- setup_common_dirs(cfg)
 
-  # ?analysis=<id> in the URL identifies work to resume. The id is validated
-  # against a strict pattern before it is ever used as a path.
+  # ?analysis=<id> in the URL identifies work to resume
   resume_id <- isolate(parseQueryString(session$clientData$url_search)$analysis)
   DIRS <- setup_analysis_dir(DIRS, cfg, session, resume_id = resume_id)
-
-  # Publish the id so the browser URL is the bookmark. Nothing else is needed to
-  # come back to this analysis later.
+  # publish url in browser
   updateQueryString(paste0("?analysis=", DIRS$analysis_id), mode = "replace")
 
-  # Start the worker pool now, in the background. A cold worker costs ~100 s to
-  # load the Bioconductor stack, and the first job of an IDAT run is the ingest,
-  # so warming only after a beta matrix exists left that cost sitting in front of
-  # the user. Done here it overlaps the upload and is paid once per process.
+  # Start the worker pool now in the background
   session$onFlushed(function() try(m4a_warm_workers(getwd()), silent = TRUE),
                     once = TRUE)
 
@@ -228,15 +218,13 @@ server <- function(input, output, session) {
   # Initialize data loading
   load_data_return <- load_data_server("load_data", DIRS, cfg)
 
-  # Resume: rehydrate from disk rather than making the user start over. Only a
+  # Resume in order to rescue from disk rather than making the user start over. Only a
   # finished analysis has a manifest, so anything half-done starts fresh.
   if (isTRUE(DIRS$resumed)) {
     manifest <- read_analysis_manifest(DIRS$analysis)
 
     if (is.null(manifest)) {
-      # No manifest at all just means the user came back before finishing the
-      # upload; that is ordinary and needs no alarm. Warn only when a manifest
-      # exists but its artifacts have gone.
+      # No manifest at all just means the user came back before finishing the upload
       if (file.exists(manifest_path(DIRS$analysis))) {
         showNotification(
           "That analysis could not be restored - its files are no longer available.",
@@ -249,8 +237,6 @@ server <- function(input, output, session) {
         load_data_return$array_names_ld(manifest$array_names)
         load_data_return$mSetSq_list_ld(manifest$mset_paths)
         load_data_return$targets_merged_ld(readRDS(manifest$targets_path))
-        # Set last: the view switch below keys off it. Only a descriptor is
-        # stored; the matrix stays on disk for the workers.
         load_data_return$beta_merged_ld(beta_descriptor(manifest$beta_path))
 
         showNotification("Welcome back - your previous analysis has been restored.",
@@ -262,9 +248,7 @@ server <- function(input, output, session) {
     }
   }
 
-  # Keep the samplesheet on disk current. It is edited in-session (cell edits,
-  # consensus clusters written back), so without this a resumed analysis would
-  # silently lose those changes.
+  # Keep the samplesheet on disk current
   observeEvent(load_data_return$targets_merged_ld(), {
     req(load_data_return$targets_merged_ld())
     path <- file.path(DIRS$beta, "merged", "targets_merged.rds")

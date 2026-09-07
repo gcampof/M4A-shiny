@@ -41,18 +41,7 @@ get_top_mad_probes <- function(beta, n) {
 }
 
 
-# Get matching colors from color palette
-get_matching_colors <- function(color_vals, color_palette){
-  n_needed    <- length(color_vals)
-  base_colors <- color_palette(n_needed)
-  if (length(base_colors) < n_needed) 
-    base_colors <- rep_len(base_colors, n_needed)
-  # Palettes can return more colours than asked for (brewer.pal has a minimum of
-  # 3), which would leave NA-named entries.
-  matched_colors <- setNames(base_colors[seq_len(n_needed)], color_vals)
-  
-  return(matched_colors)
-}
+# get_matching_colors() lives in modules/common/utils.R.
 
 
 update_all_palettes <- function(session, PALETTES) {
