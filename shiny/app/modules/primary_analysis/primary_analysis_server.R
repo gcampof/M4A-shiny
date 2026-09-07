@@ -1213,6 +1213,22 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
       validate(need(file.exists(beta_rds_path()),
                     "Beta matrix file not found on disk; please reload the data."))
 
+      # Checked here rather than in the worker. The worker raises the same thing,
+      # but only after the annotation join, so the user waited minutes for it and
+      # then got it wrapped in an ExtendedTask trace.
+      missing <- c(
+        if (length(input$diff_met_comparison_col) == 0) "a comparison column",
+        if (length(input$diff_met_baseline) == 0)       "at least one Baseline level",
+        if (length(input$diff_met_comparison) == 0)     "at least one Comparison level"
+      )
+      if (length(missing) > 0) {
+        showNotification(
+          paste0("Select ", paste(missing, collapse = ", "), " before running."),
+          type = "warning", duration = 8
+        )
+        return()
+      }
+
       queued <- m4a_queue_message()
       showNotification(
         if (is.null(queued)) "Running differential methylation analysis..." else queued,
@@ -1551,8 +1567,25 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
       list(src = res$density_png, contentType = "image/png", width = "100%")
     }, deleteFile = FALSE)
 
+    # DT renders server-side, so an error thrown in here reaches the browser as a
+    # bare "DataTables warning ... Ajax error". Any failure of the differential
+    # run is turned into a readable message instead.
+    diff_result_or_message <- function() {
+      status <- diff_task$status()
+      validate(need(!identical(status, "initial"),
+                    "Run the differential methylation analysis to see this table."))
+      validate(need(!identical(status, "running"),
+                    "Differential methylation analysis is still running."))
+      res <- tryCatch(diff_met_data(), error = function(e) e)
+      validate(need(!inherits(res, "error"),
+                    paste("Differential methylation analysis failed:",
+                          conditionMessage(res))))
+      res
+    }
+
     # DMP table
     output$diff_met_dmp_table <- DT::renderDataTable({
+      diff_result_or_message()
       req(input$diff_dmps_top_cpgs)
       dmps <- diff_filtered_dmps()
       if (nrow(dmps) > 0) {
@@ -1564,7 +1597,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
 
     # DMR table
     output$diff_met_dmr_table <- DT::renderDataTable({
-      res <- diff_met_data()
+      res <- diff_result_or_message()
       validate(need(isTRUE(res$with_champ),
                     "DMRs can only be calculated when 'Run ChAMP' is activated."))
       make_dt(res$dmrs)
@@ -1572,7 +1605,7 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
 
     # DMG table
     output$diff_met_dmg_table <- DT::renderDataTable({
-      dmgs <- diff_met_data()$dmgs
+      dmgs <- diff_result_or_message()$dmgs
       if (is.data.frame(dmgs) && nrow(dmgs) > 0 && "logFC" %in% names(dmgs)) {
         dmgs <- dmgs[abs(dmgs$logFC) > input$diff_met_lfc_cut, , drop = FALSE]
       }
@@ -1581,15 +1614,15 @@ primary_analysis_server <- function(id, load_data_return, DIRS, APP_CACHE, cfg) 
 
     # FGSEA tables
     output$diff_met_fgsea_gobp_table <- DT::renderDataTable({
-      make_dt(diff_met_data()$fgsea$gobp)
+      make_dt(diff_result_or_message()$fgsea$gobp)
     })
 
     output$diff_met_fgsea_kegg_table <- DT::renderDataTable({
-      make_dt(diff_met_data()$fgsea$kegg)
+      make_dt(diff_result_or_message()$fgsea$kegg)
     })
 
     output$diff_met_fgsea_hallmark_table <- DT::renderDataTable({
-      make_dt(diff_met_data()$fgsea$hallmark)
+      make_dt(diff_result_or_message()$fgsea$hallmark)
     })
     
     

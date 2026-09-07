@@ -116,9 +116,8 @@ docker compose -f docker-compose.prod.yml down
 Met4All is built to be shared. Several people can use one deployment at the same
 time, and one person's analysis never freezes anyone else's session.
 
-**How it works.** The app itself stays light and only handles the interface. Every
-long step — IDAT import and QC, beta-matrix generation, differential methylation,
-CNV, consensus clustering — is handed to a separate worker process. While an
+**How it works.** The app itself stays light and only handles the interface.
+Every long-running step is handed to a separate worker process. While an
 analysis runs you get a progress bar naming the current step, and you can keep
 browsing. If more analyses are requested than there are workers, the extra ones
 queue and start automatically, and you are told your position.
@@ -129,20 +128,37 @@ left off.
 
 ### Resource requirements
 
-Memory is what limits how much you can run at once, and it scales with cohort
-size rather than with the number of users. Measured on a 252-sample cohort
-(220 EPIC + 32 450K):
+Memory and disk both scale with cohort size rather than with the number of users,
+so the size of your largest dataset is what to plan around.
 
-| | Typical | Peak observed |
-|---|---|---|
-| App itself, idle | ~250 MB | — |
-| Each ready worker | ~1.5 GB | — |
-| One analysis running | — | ~17 GB |
-| Scratch disk per analysis | 7–13 GB | — |
+**Memory**
+
+| | |
+|---|---|
+| App itself, idle | ~250 MB |
+| Each ready worker | ~1.5 GB |
+| One analysis, 250 samples | ~17 GB peak |
+
+**Disk**, measured end to end on two cohorts:
+
+| Cohort | Raw IDATs | QC | Beta | Total |
+|---|---|---|---|---|
+| 68 samples (48 EPIC, 20 450K) | 1.6 GB | 1.0 GB | 1.4 GB | **3.9 GB** |
+| 252 samples (220 EPIC, 32 450K) | 6.1 GB | 3.5 GB | ~5 GB | **~15 GB** |
+
+That is roughly 60 MB of scratch per sample for a complete analysis, most of it
+the raw IDATs and the intermediate QC objects. Both can be deleted once the beta
+matrix exists.
+
+**CPU.** Each running analysis uses about one core during import and QC, because
+those steps are inherently sequential. `M4A_THREADS_PER_JOB` speeds up the later
+stages that use threaded libraries, such as the dimensionality reductions and the
+enrichment tests. So `M4A_MAX_JOBS` is what determines how busy the machine gets
+during ingest.
 
 The defaults (24 GB RAM, 30 GB disk) comfortably support one large cohort at a
-time. Bigger cohorts, or more simultaneous analyses, need proportionally more
-memory. If an analysis does run short of memory it stops with a clear message
+time. Bigger cohorts, or more simultaneous analyses, need proportionally more of
+both. If an analysis does run short of memory it stops with a clear message
 rather than being killed, and the rest of the app keeps working.
 
 ### Tuning
@@ -292,7 +308,7 @@ Then update the image tag in `docker-compose.prod.yml` and commit.
 
 ### Development Notes
 
-- `docker-compose.dev.yml` mounts `./shiny/app` over `/srv/shiny-server` in the container, so the running app uses the code in your working tree rather than the copy baked into the image. Edit `app.R` locally and pick up changes with `docker compose -f docker-compose.dev.yml restart shiny` — no rebuild needed.
+- `docker-compose.dev.yml` mounts `./shiny/app` over `/srv/shiny-server` in the container, so the running app uses the code in your working tree rather than the copy baked into the image. Edit `app.R` locally and pick up changes with `docker compose -f docker-compose.dev.yml restart shiny`, no rebuild needed.
 - The production `docker-compose.prod.yml` pulls from DockerHub and does **not** mount the app code. Only `logs/` and `data/` are bind-mounted for persistence.
 - The annotation cache is precomputed at image build time and baked in at `/opt/met4all/cache`. Override the location with the `M4A_CACHE_DIR` environment variable, when it is unset (the RStudio container) the app falls back to a local `cache/` directory. Installs that predate this can `rm -rf ./shiny/app/cache`.
 - To use the production image for Shiny but run RStudio locally: `docker compose -f docker-compose.prod.yml up -d shiny` and `docker compose -f docker-compose.dev.yml up -d rstudio`.

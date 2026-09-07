@@ -236,6 +236,12 @@ primary_analysis_ui <- function(id) {
         # Navigation buttons
         div(
           class = "d-flex flex-column gap-2",
+          actionButton(
+            ns("nav_samplesheet"),
+            "Explore Samplesheet",
+            class = "btn btn-outline-primary w-100 text-start",
+            style = "justify-content: flex-start;"
+          ),
           div(
             id = ns("nav_beta_matrix_wrapper"),
             class = "nav-btn-wrapper btn-disabled-tooltip",
@@ -302,12 +308,6 @@ primary_analysis_ui <- function(id) {
               disabled = TRUE
             )
           ),
-          actionButton(
-            ns("nav_samplesheet"),
-            "Explore Samplesheet",
-            class = "btn btn-outline-primary w-100 text-start",
-            style = "justify-content: flex-start;"
-          ),
           
           # Custom palette button input
           hr(style = "margin: 8px 0;"),
@@ -360,7 +360,7 @@ primary_analysis_ui <- function(id) {
             downloadButton(
               ns("download_log"),
               "Analysis log (.txt)",
-              class = "btn btn-outline-secondary w-100 text-start",
+              class = "btn btn-outline-primary w-100 text-start",
               style = "justify-content: flex-start;"
             )
 

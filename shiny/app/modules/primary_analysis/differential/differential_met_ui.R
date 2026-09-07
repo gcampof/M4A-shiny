@@ -141,8 +141,8 @@ differential_met_ui <- function(ns){
             p(class = "text-uppercase fw-bold mb-2",
               style = "font-size: 0.7rem; letter-spacing: 0.08em; color: #0d6efd;",
               icon("filter", style = "font-size: 0.75rem;"), " Top CpGs displayed:"),
-            sliderInput(ns("diff_dmps_top_cpgs"), label = NULL,
-                        min = 50, max = 50000, value = 1000, step = 50, width = "100%")
+            numericInput(ns("diff_dmps_top_cpgs"), label = NULL,
+                         value = 1000, min = 10, max = 10000, step = 100, width = "100%")
           ),
           div(
             class = "dt-container",

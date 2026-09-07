@@ -32,10 +32,19 @@ align_targets_to_beta_cols <- function(beta, targets, id_col) {
 
 
 # Get top cpg
+# `n` comes from a typed field, so it can arrive empty or out of range in a way
+# a slider never allowed. Checked here because MDS, PCA, UMAP and the heatmap all
+# come through this one function.
 get_top_mad_probes <- function(beta, n) {
   beta <- as.matrix(beta)
   storage.mode(beta) <- "numeric"
-  
+
+  n <- suppressWarnings(as.integer(n))
+  if (length(n) != 1L || is.na(n) || n < 10L) {
+    stop("Top CpGs must be a whole number of at least 10.")
+  }
+  n <- min(n, nrow(beta))
+
   idx <- order(matrixStats::rowMads(beta), decreasing = TRUE)[seq_len(n)]
   beta[idx, , drop = FALSE]
 }

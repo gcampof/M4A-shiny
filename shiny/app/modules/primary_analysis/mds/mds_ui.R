@@ -51,7 +51,7 @@ mds_ui <- function(ns) {
           style = "border-left: 3px solid #0d6efd; padding-left: 10px; margin-bottom: 12px;",
           p(class = "text-uppercase fw-bold mb-2 mt-1", style = "font-size: 0.7rem; letter-spacing: 0.08em; color: #0d6efd;",
             icon("calculator", style = "font-size: 0.75rem;"), " MDS Parameters"),
-          sliderInput(ns("mds_top_cpgs"), "Top CpGs (MAD):", min = 1000, max = 20000, value = 10000, step = 1000)
+          numericInput(ns("mds_top_cpgs"), "Top CpGs (MAD) (10 - 10000):", value = 10000, min = 10, max = 10000, step = 100)
         ),
         
         div(
