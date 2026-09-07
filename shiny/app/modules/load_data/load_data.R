@@ -632,22 +632,6 @@ load_data_server <- function(id, DIRS, cfg) {
     })
 
     observeEvent(input$run_qc, {
-      # Refuse up front rather than being OOM-killed twenty minutes in.
-      sel <- input$idat_table_rows_selected
-      df  <- samples_df()
-      chosen <- if (length(sel)) df[sel, , drop = FALSE] else df
-      widest <- if (nrow(chosen) == 0) "EPIC" else
-        names(sort(table(chosen$Array_Type), decreasing = TRUE))[1]
-      tryCatch(
-        m4a_check_memory(nrow(chosen), widest, what = "Quality control"),
-        error = function(e) {
-          shinyjs::hide("ld_loading_view")
-          shinyjs::show("ld_idats_view")
-          alert_message(list(type = "error", text = conditionMessage(e)))
-          req(FALSE)
-        }
-      )
-
       shinyjs::hide("ld_idats_view")
       shinyjs::show("ld_loading_view")
 
@@ -833,21 +817,6 @@ load_data_server <- function(id, DIRS, cfg) {
 
     observeEvent(input$qc_continue, {
       arrays <- array_names()
-
-      # This stage peaks higher than QC: rgSet and MethylSet are live together.
-      n_total <- sum(vapply(arrays, function(a) {
-        s <- qc_summaries[[a]]
-        if (is.null(s)) 0L else length(s$samples)
-      }, integer(1)))
-      if (n_total > 0) {
-        tryCatch(
-          m4a_check_memory(n_total, arrays[1], what = "Beta-matrix generation"),
-          error = function(e) {
-            alert_message(list(type = "error", text = conditionMessage(e)))
-            req(FALSE)
-          }
-        )
-      }
 
       shinyjs::hide("ld_qc_view")
       shinyjs::show("ld_loading_view")
