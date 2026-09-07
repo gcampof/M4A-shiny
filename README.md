@@ -35,7 +35,7 @@ For every analysis, you can customize both the **analytical parameters** and the
 
 ## Test Dataset
 
-We provide a pre-downloaded dataset from [GSE267015](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE267015) (n = 70 samples, EPIC + 450k arrays), from the retinoblastoma study published in [PMID 39079981](https://pubmed.ncbi.nlm.nih.gov/39079981/). You can download it directly from this repository's [Releases](../../releases) page.
+We provide a pre-downloaded dataset from [GSE267015](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE267015) (n = 68 samples, EPIC + 450k arrays), from the retinoblastoma study published in [PMID 39079981](https://pubmed.ncbi.nlm.nih.gov/39079981/). You can download it directly from this repository's [Releases](../../releases) page.
 
 ---
 
@@ -68,7 +68,7 @@ mkdir -p ./shiny/logs ./shiny/app/data
 chmod 777 ./shiny/logs ./shiny/app/data
 ```
 
-> These directories are where the app writes logs, user uploads, and analysis results. The app code itself is bundled inside the Docker image and does not need to be present on your machine.
+> These directories are where the app writes logs, user uploads, and analysis results. The app code itself is bundled inside the Docker image.
 
 ### Step 3 - Start Met4All
 
@@ -114,58 +114,67 @@ docker compose -f docker-compose.prod.yml down
 ## Sharing Met4All Between Users
 
 Met4All is meant to be left running and shared. Several people can use the same
-deployment at once, and nobody has to wait for anyone else to finish.
+deployment at once.
 
-What it provides natively:
+What it provides out of the box:
 
-- **Your session stays responsive while an analysis runs.** You can look at
-  earlier results on another tab, while a new beta matrix
-  for your next analysis is being built.
-- **Close the tab whenever you like.** The address in your browser bar identifies
-  your analysis. Come back to it later, on the same machine or another one, and
-  it picks up where it left off. After X minutes that session will be closed and you won't be able to acces it
-- **Requests queue** If everyone starts an analysis at once,
-  the extras wait their turn and you are told your position.
-
-**How it works.** The interface runs in one process that deliberately does no
-heavy lifting (explain the package used breifly). Every long step is handed to a pool of separate worker processes,
-which is why one person's forty-minute run cannot freeze anyone else's browser.
-
+- **Run several analyses at the same time.** Launch a heatmap, then start a
+  differential analysis without waiting for it, or work on a second dataset in
+  another tab. They run alongside each other, and every open interface stays
+  responsive while they do.
+- **Close the tab and come back whenever you want.** The address in your browser
+  bar identifies your analysis, so you can reopen it later from any machine and
+  carry on. After 60 minutes with nobody connected the app releases the session
+  from memory, but nothing is lost: reopening the address rebuilds it from disk.
+  Results live in `./shiny/app/data/analysis_<date>_<time>_<id>` and are never
+  deleted automatically.
+- **Requests queue** If more analyses are submitted than
+  `M4A_MAX_JOBS` allows, the extras wait and start automatically as earlier ones
+  finish, and each user is told their position in the queue.
+- **A downloadable log** of everything an analysis printed, for when a result
+  looks wrong and you want to see what happened.
 
 ### One instance or several
 
-**Start with `docker-compose.prod.yml`.** A single instance already runs analyses
-in parallel and keeps everyone's interface responsive. It is one command,
-one container, and nothing else to administer.
+**Start with `docker-compose.prod.yml`.** A single instance already runs several
+analyses in parallel and keeps every open interface responsive, in one container
+with nothing else to administer. This is the right choice on a workstation and
+for most laboratory servers.
 
-If you need **more analyses running at once**, raise `M4A_MAX_JOBS` first. That is
-one line in your compose file and it needs no extra infrastructure. Memory is the
-limit, guarder around 22 GB per simultaneous analysis.
+To run **more analyses at the same time**, raise `M4A_MAX_JOBS` in the
+`environment:` block of your compose file (see [Tuning](#tuning)). Editing it
+there takes effect on the next `docker compose up`, with no image rebuild. Bear
+in mind that methylation analyses are memory intensive: budget the peak memory
+for your largest cohort per simultaneous analysis, and leave the machine some
+headroom.
 
 Move to `docker-compose.scale.yml` when you want something a single instance
-cannot give you:
+cannot provide:
 
 - **Failure isolation.** With one instance, a crash disconnects everyone. With
-  several, it affects only the people on that instance and the rest carry on.
-- **Many people using the interface simultaneously.** Drawing heatmaps, rendering
-  CNV plots and preparing downloads all happen in each instance's interface
-  process. With a dozen active users that becomes the bottleneck, and more
-  instances spread it out.
+  several, only the users on that instance are affected and the rest carry on.
+- **Many people using the interface at once.** Drawing heatmaps, rendering CNV
+  plots and preparing downloads all happen in each instance's interface process.
+  With a dozen active users that becomes the bottleneck, and more instances
+  spread the load.
 
 ```bash
 docker compose -f docker-compose.scale.yml up -d --scale shiny=4
 ```
 
-The app is served on the same address (**http://localhost:3838**, or set
-`M4A_PORT`). Each user is kept on the instance that served them, handled
-automatically. Note that both options run on one machine, so several instances
-divide the same memory rather than adding any.
+`--scale shiny=N` sets how many instances to start. They share one address
+(**http://localhost:3838**, or set `M4A_PORT`), and each user is kept on the
+instance that served them automatically. Both options run on a single machine, so
+several instances divide the same memory rather than adding any: this is about
+resilience and interface throughput, not extra capacity.
+
+Because the image holds no state that other instances need, sites already running
+Docker Swarm or Kubernetes can deploy it on their own platform unchanged.
 
 ### Resource requirements
 
-Memory and disk scale with **dataset size**, not with the number of users, so plan
-around your largest dataset. Measured end to end on the test dataset (68 samples:
-48 EPIC and 20 450K):
+Memory and disk scale with **dataset size**. Measured end to end on the [Test dataset](#test-dataset)  (68 samples:
+59 EPIC and 9 450K):
 
 | | |
 |---|---|
@@ -174,11 +183,10 @@ around your largest dataset. Measured end to end on the test dataset (68 samples
 | Each ready worker | ~1.5 GB |
 | Disk, complete analysis | ~3.9 GB |
 
-As a rough
-guide, allow **60 MB of working space per sample**.
+As a rough guide, allow **60 MB of working space per sample**.
 
-Peak memory grows with the cohort: a 68-sample run peaks near 22 GB. The
-defaults (24 GB RAM, 30 GB disk) comfortably handle one large dataset at a time.
+If an analysis does run short of memory it stops with a clear message rather than
+being killed, and the rest of the app keeps working.
 
 ### Tuning
 
